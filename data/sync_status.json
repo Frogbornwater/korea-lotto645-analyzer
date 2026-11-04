@@ -1,16 +1,29 @@
 {
   "status": "success",
-  "source": "Donghaeng Lottery official result-page JSON",
-  "source_type": "official_site_frontend_endpoint",
-  "source_url": "https://www.dhlottery.co.kr/lt645/result",
-  "sync_mode": "full_official_backfill",
-  "updated_at_utc": "2026-11-04T16:07:18+00:00",
+  "source": "Donghaeng Lottery cumulative history Excel export (user-provided)",
+  "source_type": "user_provided_official_excel_export",
+  "source_url": "https://www.dhlottery.co.kr/lt645/stats",
+  "imported_at_utc": "2026-11-04T16:40:39+00:00",
   "rows": 1248,
   "first_draw": 1,
   "last_draw": 1248,
   "missing_draw_count": 0,
-  "duplicate_count": 0,
-  "date_error_count": 0,
+  "duplicate_draw_count": 0,
+  "invalid_record_count": 0,
   "complete_from_draw_1": true,
-  "note": "仅官方来源；未使用第三方数据补齐。仅完整连续数据会写入 CSV。"
+  "draw_dates_in_source": false,
+  "date_note": "Uploaded Excel did not include draw dates; date column is intentionally blank rather than inferred.",
+  "number_validation": {
+    "main_numbers_per_draw": 6,
+    "main_numbers_range": "1-45",
+    "main_numbers_unique_within_draw": true,
+    "bonus_range": "1-45",
+    "bonus_excluded_from_main_numbers": true
+  },
+  "csv_sha256": "e61ae86eb1fe0d7ffe94c2da38aef9346c1f0a80a819e4781907e2bcb16fa3de",
+  "note": "Imported from the user's uploaded Donghaeng Lottery cumulative-history Excel export. This validates file structure and draw continuity; it is not a live re-query of the official server.",
+  "updated_at_utc": "2026-11-04T16:40:39+00:00",
+  "sync_mode": "manual_official_excel_import",
+  "last_draw_date": null,
+  "date_errors": 0
 }
