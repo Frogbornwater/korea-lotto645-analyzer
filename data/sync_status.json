@@ -1,0 +1,8 @@
+{
+  "status": "failed",
+  "source": "Donghaeng official result-page JSON",
+  "failed_at_utc": "2026-11-04T15:51:32+00:00",
+  "error": "官方第 31 期附近查询失败：https://www.dhlottery.co.kr/lt645/selectPstLt645InfoNew.do: 请求官方数据失败：HTTPSConnectionPool(host='www.dhlottery.co.kr', port=443): Max retries exceeded with url: /lt645/selectPstLt645InfoNew.do?srchDir=center&srchLtEpsd=31 (Caused by ConnectTimeoutError(<HTTPSConnection(host='www.dhlottery.co.kr', port=443) at 0x7fcfcba2edb0>, 'Connection to www.dhlottery.co.kr timed out. (connect timeout=20)')) | https://www.dhlottery.co.kr/lt645/selectPstLt645Info.do: 请求官方数据失败：HTTPSConnectionPool(host='www.dhlottery.co.kr', port=443): Max retries exceeded with url: /lt645/selectPstLt645Info.do?srchLtEpsd=31 (Caused by ConnectTimeoutError(<HTTPSConnection(host='www.dhlottery.co.kr', port=443) at 0x7fcfcba12960>, 'Connection to www.dhlottery.co.kr timed out. (connect timeout=20)'))",
+  "previous_csv_preserved": false,
+  "note": "同步失败时保留上一份历史 CSV，不使用第三方来源静默替代。"
+}
