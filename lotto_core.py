@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import math
 import random
+import re
 from collections import Counter
 from itertools import combinations
 from typing import Any, Iterable
@@ -44,7 +45,7 @@ def normalize_date(value: Any) -> str:
 
 
 def normalize_record(obj: dict[str, Any]) -> dict[str, Any] | None:
-    """Normalize official result-page fields and common CSV aliases."""
+    """Normalize a single Donghaeng official result record."""
     try:
         draw_no = int(_first(obj, ["draw_no", "drwNo", "round", "회차", "ltEpsd"]))
         raw_numbers = _first(obj, ["numbers", "winning_numbers", "winningNumbers"])
@@ -53,8 +54,12 @@ def normalize_record(obj: dict[str, Any]) -> dict[str, Any] | None:
                 _first(obj, [f"drwtNo{i}", f"tm{i}WnNo", f"n{i}", f"num{i}", f"number{i}"])
                 for i in range(1, 7)
             ]
+        if isinstance(raw_numbers, str):
+            raw_numbers = [int(x) for x in re.findall(r"\d+", raw_numbers)]
         nums = sorted(int(x) for x in raw_numbers)
-        bonus = int(_first(obj, ["bonus", "bonus_no", "bonus_number", "bnusNo", "bnsWnNo", "보너스"]))
+        bonus = int(_first(
+            obj, ["bonus", "bonus_no", "bonus_number", "bonusNumber", "bnusNo", "bnsWnNo", "보너스"]
+        ))
         date = normalize_date(_first(obj, ["date", "draw_date", "drwNoDate", "ltRflYmd", "추첨일"], ""))
         if draw_no < 1 or len(nums) != 6 or len(set(nums)) != 6:
             return None
@@ -67,52 +72,43 @@ def normalize_record(obj: dict[str, Any]) -> dict[str, Any] | None:
     except (TypeError, ValueError, KeyError):
         return None
 
-
 def extract_records(payload: Any) -> list[dict[str, Any]]:
-    """Extract draw items from the official 2026 result JSON response shapes."""
-    raw: Any = payload
-    if isinstance(raw, dict):
-        # The official result page's specific-round endpoint.
-        data = raw.get("data")
-        if isinstance(data, dict) and isinstance(data.get("list"), list):
-            raw = data["list"]
-        else:
-            # The official main-info response nests recent Lotto rounds here.
-            try:
-                nested = data["result"]["pstLtEpstInfo"]["lt645"]
-                if isinstance(nested, list):
-                    raw = nested
-                else:
-                    raw = []
-            except (TypeError, KeyError):
-                if any(k in raw for k in ("draw_no", "drwNo", "ltEpsd")):
-                    raw = [raw]
-                else:
-                    for key in ("results", "draws", "list"):
-                        if isinstance(raw.get(key), list):
-                            raw = raw[key]
-                            break
-                    else:
-                        raw = []
-    if not isinstance(raw, list):
-        return []
-    by_round: dict[int, dict[str, Any]] = {}
-    for item in raw:
-        if isinstance(item, dict):
-            rec = normalize_record(item)
-            if rec:
-                by_round[rec["draw_no"]] = rec
-    return [by_round[k] for k in sorted(by_round)]
+    """Recursively find official draw records across current/legacy JSON envelopes."""
+    found: dict[int, dict[str, Any]] = {}
 
+    def walk(node: Any) -> None:
+        if isinstance(node, dict):
+            # Only normalize objects that look like a draw record; recursively
+            # inspect all envelopes because the site's nesting can change.
+            looks_like_record = any(
+                key in node for key in ("draw_no", "drwNo", "ltEpsd", "회차")
+            )
+            if looks_like_record:
+                rec = normalize_record(node)
+                if rec:
+                    old = found.get(rec["draw_no"])
+                    if old is not None and old != rec:
+                        raise ValueError(f"同一期次出现互相冲突的官方记录：第 {rec['draw_no']} 期")
+                    found[rec["draw_no"]] = rec
+            for value in node.values():
+                walk(value)
+        elif isinstance(node, list):
+            for value in node:
+                walk(value)
+
+    walk(payload)
+    return [found[k] for k in sorted(found)]
 
 def validate_frame(frame: pd.DataFrame | None) -> pd.DataFrame:
+    """Normalize, validate and sort draw rows; reject conflicting duplicate rounds."""
     if frame is None or frame.empty:
         return pd.DataFrame(columns=COLUMNS)
     tmp = frame.copy()
     aliases = {
         "회차": "draw_no", "round": "draw_no", "drwNo": "draw_no", "ltEpsd": "draw_no",
         "추첨일": "date", "draw_date": "date", "drwNoDate": "date", "ltRflYmd": "date",
-        "보너스": "bonus", "bonus_no": "bonus", "bnusNo": "bonus", "bnsWnNo": "bonus",
+        "보너스": "bonus", "bonus_no": "bonus", "bonus_number": "bonus",
+        "bnusNo": "bonus", "bnsWnNo": "bonus",
     }
     tmp = tmp.rename(columns={c: aliases[c] for c in tmp.columns if c in aliases})
     for i in range(1, 7):
@@ -127,15 +123,15 @@ def validate_frame(frame: pd.DataFrame | None) -> pd.DataFrame:
         raise ValueError("历史数据缺少字段：" + ", ".join(missing))
     for col in required:
         tmp[col] = pd.to_numeric(tmp[col], errors="coerce")
-    tmp = tmp.dropna(subset=required)
+
     rows = []
     for _, row in tmp.iterrows():
-        try:
-            draw_no = int(row["draw_no"])
-            nums = sorted(int(row[c]) for c in NUMBER_COLS)
-            bonus = int(row["bonus"])
-        except (TypeError, ValueError):
+        vals = [row[c] for c in required]
+        if any(pd.isna(v) or not float(v).is_integer() for v in vals):
             continue
+        draw_no = int(row["draw_no"])
+        nums = sorted(int(row[c]) for c in NUMBER_COLS)
+        bonus = int(row["bonus"])
         if draw_no < 1 or len(set(nums)) != 6 or any(n < 1 or n > 45 for n in nums):
             continue
         if bonus < 1 or bonus > 45 or bonus in nums:
@@ -144,26 +140,48 @@ def validate_frame(frame: pd.DataFrame | None) -> pd.DataFrame:
         rec.update({f"n{i}": nums[i - 1] for i in range(1, 7)})
         rec["bonus"] = bonus
         rows.append(rec)
+
     if not rows:
         return pd.DataFrame(columns=COLUMNS)
-    return (pd.DataFrame(rows, columns=COLUMNS)
-            .drop_duplicates("draw_no", keep="last")
-            .sort_values("draw_no").reset_index(drop=True))
+    result = pd.DataFrame(rows, columns=COLUMNS).sort_values("draw_no").reset_index(drop=True)
 
+    # Exact repeated records can be deduplicated; conflicting rows for one draw
+    # are rejected instead of silently allowing "last row wins".
+    duplicated = result[result.duplicated("draw_no", keep=False)]
+    for draw_no, group in duplicated.groupby("draw_no"):
+        compare_cols = list(COLUMNS)
+        if len(group[compare_cols].drop_duplicates()) > 1:
+            raise ValueError(f"第 {int(draw_no)} 期存在互相冲突的重复记录")
+    return result.drop_duplicates("draw_no", keep="last").reset_index(drop=True)
 
 def quality_report(frame: pd.DataFrame) -> dict[str, Any]:
-    df = validate_frame(frame)
-    if df.empty:
-        return {"rows": 0, "first_draw": None, "last_draw": None, "missing_draws": [], "date_errors": 0,
-                "duplicates": 0, "sequence_complete": False}
-    present = set(df["draw_no"].astype(int))
-    first, last = int(df["draw_no"].min()), int(df["draw_no"].max())
-    missing = [n for n in range(first, last + 1) if n not in present]
-    date_errors = sum(1 for d in df["date"].astype(str) if d and (len(d) != 10 or d[4:5] != "-" or d[7:8] != "-"))
-    return {"rows": len(df), "first_draw": first, "last_draw": last, "missing_draws": missing,
-            "date_errors": date_errors, "duplicates": int(frame["draw_no"].duplicated().sum()) if "draw_no" in frame else 0,
-            "sequence_complete": first == 1 and not missing}
-
+    raw = frame.copy() if isinstance(frame, pd.DataFrame) else pd.DataFrame()
+    duplicate_count = int(raw["draw_no"].duplicated().sum()) if "draw_no" in raw.columns else 0
+    clean = validate_frame(raw)
+    if clean.empty:
+        return {
+            "rows": 0, "first_draw": None, "last_draw": None, "missing_draws": [],
+            "date_errors": 0, "duplicates": duplicate_count, "invalid_rows": len(raw),
+            "sequence_complete": False,
+        }
+    present = set(clean["draw_no"].astype(int))
+    first, last = int(clean["draw_no"].min()), int(clean["draw_no"].max())
+    missing = [n for n in range(1, last + 1) if n not in present]
+    date_errors = 0
+    for value in clean["date"].astype(str):
+        if not value:
+            date_errors += 1
+            continue
+        try:
+            pd.to_datetime(value, format="%Y-%m-%d", errors="raise")
+        except (TypeError, ValueError):
+            date_errors += 1
+    return {
+        "rows": len(clean), "first_draw": first, "last_draw": last,
+        "missing_draws": missing, "date_errors": date_errors,
+        "duplicates": duplicate_count, "invalid_rows": max(0, len(raw) - len(clean)),
+        "sequence_complete": first == 1 and not missing,
+    }
 
 def get_numbers(df: pd.DataFrame) -> list[list[int]]:
     clean = validate_frame(df)
@@ -239,21 +257,18 @@ def _counts_for_window(df: pd.DataFrame, window: int | None) -> tuple[np.ndarray
 
 
 def model_weights(df: pd.DataFrame, model: str, window: int = 100, half_life: float = 40.0) -> np.ndarray:
-    """Return relative number weights, not calibrated winning probabilities."""
+    """Return relative number weights; these are not calibrated draw probabilities."""
     clean = validate_frame(df)
-    if clean.empty:
+    if clean.empty or model in ("均匀随机基准", "历史结构约束模型"):
         return np.ones(45, dtype=float)
+    window = max(1, int(window))
     counts, n_draws = _counts_for_window(clean, window)
     long_counts, long_n = _counts_for_window(clean, None)
     prior_rate = 6 / 45
-    # 40 pseudo-draws shrink observed rates toward the theoretical 6/45 baseline.
     prior_draws = 40.0
-    posterior = (counts + prior_draws * prior_rate) / max(n_draws + prior_draws, 1.0)
     if model == "近期频率模型":
-        # A lighter prior lets the short-window model react more to recent counts.
         recent_prior = 8.0
-        recent_rate = (counts + recent_prior * prior_rate) / max(n_draws + recent_prior, 1.0)
-        return np.maximum(recent_rate, 1e-8)
+        return np.maximum((counts + recent_prior * prior_rate) / max(n_draws + recent_prior, 1.0), 1e-8)
     if model == "长期频率模型":
         return np.maximum((long_counts + prior_draws * prior_rate) / max(long_n + prior_draws, 1.0), 1e-8)
     if model == "指数时间衰减模型":
@@ -266,10 +281,8 @@ def model_weights(df: pd.DataFrame, model: str, window: int = 100, half_life: fl
         pseudo = max(prior_draws * prior_rate, 1.0)
         return np.maximum(decayed + pseudo, 1e-8)
     if model == "贝叶斯平滑模型":
-        # Stronger prior shrinkage avoids treating noisy short-window leaders as signal.
         bayes_prior = 80.0
-        bayes_rate = (counts + bayes_prior * prior_rate) / max(n_draws + bayes_prior, 1.0)
-        return np.maximum(bayes_rate, 1e-8)
+        return np.maximum((counts + bayes_prior * prior_rate) / max(n_draws + bayes_prior, 1.0), 1e-8)
     if model == "综合评分模型":
         short_counts, short_n = _counts_for_window(clean, min(50, len(clean)))
         mid_counts, mid_n = _counts_for_window(clean, min(200, len(clean)))
@@ -277,8 +290,7 @@ def model_weights(df: pd.DataFrame, model: str, window: int = 100, half_life: fl
         mid = (mid_counts + 40 * prior_rate) / max(mid_n + 40, 1)
         long = (long_counts + 80 * prior_rate) / max(long_n + 80, 1)
         return np.maximum(0.40 * short + 0.35 * mid + 0.25 * long, 1e-8)
-    return np.ones(45, dtype=float)
-
+    raise ValueError(f"未知选号模型：{model}")
 
 def number_score_table(df: pd.DataFrame, window: int = 100) -> pd.DataFrame:
     rows = []
@@ -319,38 +331,71 @@ def generate_candidates(
     df: pd.DataFrame, count: int = 10, model: str = "综合评分模型", window: int = 100,
     max_overlap: int = 5, seed: int | None = None,
 ) -> tuple[pd.DataFrame, bool]:
+    """Generate distinct candidate tickets; any overlap relaxation is explicit and keeps the chosen model."""
     clean = validate_frame(df)
     if clean.empty:
         raise ValueError("没有历史数据。请先从 GitHub Actions 同步官方历史开奖数据。")
+    if model not in MODEL_NAMES:
+        raise ValueError(f"未知选号模型：{model}")
+    count = int(count)
+    max_overlap = int(max_overlap)
+    if not 1 <= count <= 20:
+        raise ValueError("候选组数必须在 1—20 之间。")
+    if not 0 <= max_overlap <= 5:
+        raise ValueError("跨组最大重号数必须在 0—5 之间。")
+
     rng = np.random.default_rng(seed)
-    history_features = draw_features(clean.tail(min(window, len(clean))))
+    history_features = draw_features(clean.tail(min(max(1, int(window)), len(clean))))
     weights = model_weights(clean, model, window)
-    score = number_score_table(clean, window).set_index("号码")["综合相对得分"].to_dict()
-    tickets: list[list[int]] = []
-    relaxed = False
-    max_attempts = max(5000, count * 1200)
-    for _ in range(max_attempts):
-        if len(tickets) >= count:
-            break
-        if model == "均匀随机基准" or model == "历史结构约束模型":
+    if model not in ("均匀随机基准", "历史结构约束模型"):
+        raw_scores = np.asarray(weights, dtype=float)
+        lo, hi = float(raw_scores.min()), float(raw_scores.max())
+        scaled_scores = np.full(45, 50.0) if hi <= lo else 100.0 * (raw_scores - lo) / (hi - lo)
+    else:
+        scaled_scores = np.full(45, 50.0)
+
+    def draw_one() -> list[int] | None:
+        if model in ("均匀随机基准", "历史结构约束模型"):
             cand = sorted(int(x) for x in rng.choice(np.arange(1, 46), 6, replace=False))
             if model == "历史结构约束模型" and not _structure_ok(cand, history_features):
-                continue
-        else:
-            cand = _weighted_ticket(rng, weights)
-        if cand in tickets:
-            continue
-        if tickets and max(len(set(cand) & set(old)) for old in tickets) > max_overlap:
-            continue
-        tickets.append(cand)
+                return None
+            return cand
+        return _weighted_ticket(rng, weights)
+
+    tickets: list[list[int]] = []
+    requested_overlap = max_overlap
+    # With zero overlap, at most floor(45/6)=7 tickets can exist. Skip an
+    # impossible first pass when the user requests more than seven.
+    allowed_overlap = 1 if max_overlap == 0 and count > 7 else max_overlap
+    relaxed = allowed_overlap != requested_overlap
+    max_attempts = max(8000, count * 1000)
+
     while len(tickets) < count:
-        relaxed = True
-        cand = sorted(int(x) for x in rng.choice(np.arange(1, 46), 6, replace=False))
-        if cand not in tickets:
+        for _ in range(max_attempts):
+            cand = draw_one()
+            if cand is None or cand in tickets:
+                continue
+            if tickets and max(len(set(cand) & set(old)) for old in tickets) > allowed_overlap:
+                continue
             tickets.append(cand)
+            if len(tickets) >= count:
+                break
+        if len(tickets) >= count:
+            break
+        if allowed_overlap >= 5:
+            raise RuntimeError(
+                f"在已允许每两组最多共享 5 个号码的情况下，仍无法生成 {count} 组互不重复组合。"
+            )
+        allowed_overlap += 1
+        relaxed = True
+
+    actual_max_overlap = max(
+        (len(set(a) & set(b)) for i, a in enumerate(tickets) for b in tickets[i + 1:]),
+        default=0,
+    )
     rows = []
     for idx, nums in enumerate(tickets, start=1):
-        relative_score = float(np.mean([score[n] for n in nums]))
+        relative_score = float(np.mean([scaled_scores[n - 1] for n in nums]))
         odd = sum(n % 2 for n in nums)
         rows.append({
             "组合": f"{idx:02d}", "模型": model,
@@ -358,10 +403,12 @@ def generate_candidates(
             "号码列表": nums, "和值": sum(nums), "奇数个数": odd,
             "低中高区": f"{sum(n <= 15 for n in nums)}-{sum(16 <= n <= 30 for n in nums)}-{sum(n >= 31 for n in nums)}",
             "模型相对得分": round(relative_score, 2),
-            "与其他候选最大重号": max((len(set(nums) & set(other)) for j, other in enumerate(tickets) if j != idx - 1), default=0),
+            "请求跨组最大重号": requested_overlap,
+            "实际允许最大重号": allowed_overlap,
+            "实际跨组最大重号": actual_max_overlap,
+            "跨组限制已放宽": relaxed,
         })
     return pd.DataFrame(rows), relaxed
-
 
 def theoretical_random_metrics() -> dict[str, float]:
     total = math.comb(45, 6)
@@ -379,7 +426,7 @@ def run_backtest(
         return pd.DataFrame(), pd.DataFrame()
     all_nums = get_numbers(clean)
     start = max(lookback, len(clean) - min(test_draws, len(clean) - lookback))
-    strategies = ["均匀随机基准", "近期频率模型", "长期频率模型", "指数时间衰减模型", "贝叶斯平滑模型", "综合评分模型"]
+    strategies = ["均匀随机基准", "近期频率模型", "长期频率模型", "指数时间衰减模型", "贝叶斯平滑模型", "综合评分模型", "历史结构约束模型"]
     rows: list[dict[str, Any]] = []
     for i in range(start, len(clean)):
         train = clean.iloc[max(0, i - lookback):i].copy()

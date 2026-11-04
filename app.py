@@ -109,11 +109,17 @@ with tabs[0]:
         st.markdown(f"#### 候选结果：{st.session_state.get('v3_model')} · {st.session_state.get('v3_window')}")
         st.dataframe(generated.drop(columns=["号码列表"]), hide_index=True, use_container_width=True)
         if st.session_state.get("v3_relaxed"):
-            st.info("为满足候选组数，程序放宽了跨组重号限制。")
+            allowed = int(generated["实际允许最大重号"].iloc[0])
+            requested = int(generated["请求跨组最大重号"].iloc[0])
+            actual = int(generated["实际跨组最大重号"].iloc[0])
+            st.info(
+                f"为满足候选组数，跨组重号上限由 {requested} 放宽到 {allowed}；"
+                f"本批候选实际最大重号为 {actual}。仍按所选模型生成，没有切换成纯随机补齐。"
+            )
         st.download_button("下载候选号码 CSV", generated.drop(columns=["号码列表"]).to_csv(index=False).encode("utf-8-sig"),
                            "lotto645_v3_candidates.csv", "text/csv")
         st.caption("模型相对得分只反映所选算法下号码的相对偏好，经当前样本缩放；不是单号或组合的中奖概率。")
-    st.markdown("#### 五类模型的号码相对评分")
+    st.markdown("#### 五种频率模型的号码综合相对评分")
     selected_window = len(df) if window is None else min(window, len(df))
     score_table = number_score_table(df, selected_window)
     fig = px.bar(score_table.sort_values("号码"), x="号码", y="综合相对得分", title="45 个号码的综合相对评分（0—100）")
