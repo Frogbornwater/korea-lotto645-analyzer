@@ -160,6 +160,7 @@ def load_existing() -> tuple[pd.DataFrame, dict]:
 
 def main() -> None:
     DATA_DIR.mkdir(parents=True, exist_ok=True)
+    print("开始执行韩国 Lotto 6/45 官方历史数据同步。", flush=True)
     old_csv_exists = CSV_PATH.exists()
     try:
         latest = get_latest_round()
@@ -225,3 +226,6 @@ def main() -> None:
         print(json.dumps(status, ensure_ascii=False, indent=2))
         raise
 
+
+if __name__ == "__main__":
+    main()
