@@ -1,19 +1,17 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
-import io
+import json
 from pathlib import Path
-from typing import Any
 
 import pandas as pd
 import plotly.express as px
-import requests
 import streamlit as st
 
 from lotto_core import (
-    COLUMNS, draw_features, extract_records, frequency_table, gap_table,
-    generate_candidates, insights, merge_histories, pair_table, quality_report,
-    run_backtest, validate_frame,
+    COLUMNS, MODEL_NAMES, compare_ticket_to_history, draw_features, frequency_table,
+    gap_table, generate_candidates, number_score_table, pair_table, quality_report,
+    run_backtest, validate_frame, theoretical_random_metrics,
 )
 
 APP_DIR = Path(__file__).resolve().parent
@@ -21,328 +19,205 @@ DATA_DIR = APP_DIR / "data"
 CSV_PATH = DATA_DIR / "lotto645.csv"
 STATUS_PATH = DATA_DIR / "sync_status.json"
 OFFICIAL_RESULT_URL = "https://www.dhlottery.co.kr/lt645/result"
-LATEST_URL = "https://www.dhlottery.co.kr/lt645/selectPstLt645Info.do"
-WINDOW_URL = "https://www.dhlottery.co.kr/lt645/selectPstLt645InfoNew.do"
-MIRROR_ALL_URL = "https://smok95.github.io/lotto/results/all.json"
-REPO_CSV_URL = "https://raw.githubusercontent.com/Frogbornwater/korea-lotto645-analyzer/main/data/lotto645.csv"
-HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; Lotto645Research/2.0)",
-           "Accept": "application/json,text/plain,*/*"}
 
-st.set_page_config(page_title="韩国 Lotto 6/45 AI 研究台 V2", page_icon="🎯", layout="wide")
+st.set_page_config(page_title="Lotto 645 V3 · 历史数据预测实验室", page_icon="🎯", layout="wide")
+st.title("🎯 韩国 Lotto 6/45 · V3 历史数据预测实验室")
+st.caption("官方历史数据优先｜多模型候选生成｜滚动样本外回测｜研究与娱乐用途")
 
 
-def _get_json(url: str, params: dict[str, Any] | None = None) -> dict:
-    r = requests.get(url, params=params, headers=HEADERS, timeout=20)
-    r.raise_for_status()
-    payload = r.json()
-    if not isinstance(payload, dict):
-        raise ValueError("数据源没有返回 JSON 对象")
-    return payload
-
-
-def fetch_online_history() -> tuple[pd.DataFrame, str, list[str]]:
-    """Official-site result endpoint first; third-party mirror is fallback/bootstrap."""
-    warnings: list[str] = []
-    official = pd.DataFrame(columns=COLUMNS)
-    mirror = pd.DataFrame(columns=COLUMNS)
-    try:
-        latest_payload = _get_json(LATEST_URL)
-        latest_records = extract_records(latest_payload)
-        if not latest_records:
-            raise ValueError("最新期接口返回结构无法识别")
-        latest_no = max(x["draw_no"] for x in latest_records)
-        detail_payload = _get_json(WINDOW_URL, {"srchDir": "center", "srchLtEpsd": latest_no})
-        detail_records = extract_records(detail_payload)
-        official = merge_histories(pd.DataFrame(latest_records), pd.DataFrame(detail_records))
-        if official.empty or int(official["draw_no"].max()) != latest_no:
-            raise ValueError("官方结果页的最新期校验未通过")
-    except Exception as exc:
-        warnings.append(f"官方站点数据暂时不可用：{exc}")
-    try:
-        mirror_records = extract_records(_get_json(MIRROR_ALL_URL))
-        mirror = validate_frame(pd.DataFrame(mirror_records))
-        if mirror.empty:
-            raise ValueError("镜像没有有效记录")
-    except Exception as exc:
-        warnings.append(f"第三方历史镜像暂时不可用：{exc}")
-    if official.empty and mirror.empty:
-        raise RuntimeError("官方站点和备用数据源都无法获取数据。可尝试导入 CSV。\n" + "\n".join(warnings))
-    combined = merge_histories(mirror, official)
-    source = "官方结果页 + 第三方历史镜像" if not official.empty and not mirror.empty else (
-        "官方结果页 JSON" if not official.empty else "第三方历史镜像（备用）")
-    if not official.empty and not mirror.empty:
-        m = mirror.set_index("draw_no")
-        o = official.set_index("draw_no")
-        overlap = sorted(set(m.index) & set(o.index))
-        conflicts = [n for n in overlap if m.loc[n, NUMBER_COLS + ["bonus"]].tolist() != o.loc[n, NUMBER_COLS + ["bonus"]].tolist()]
-        if conflicts:
-            warnings.append(f"官方结果页与镜像在 {len(conflicts)} 期存在号码差异；已优先采用官方结果页中有覆盖的期次。差异期数示例：{conflicts[:8]}")
-    return combined, source, warnings
-
-
-def load_repo_history() -> tuple[pd.DataFrame, str]:
-    # Pull the tracked CSV from GitHub so a running Streamlit container can see
-    # data committed by the scheduled GitHub Actions workflow without relying
-    # on its ephemeral local disk. Fall back to the local checkout when offline.
-    try:
-        response = requests.get(REPO_CSV_URL, headers=HEADERS, timeout=12)
-        if response.ok and response.text.strip():
-            remote = validate_frame(pd.read_csv(io.StringIO(response.text)))
-            if not remote.empty:
-                return remote, "GitHub 仓库持久化历史数据"
-    except Exception:
-        pass
-    if CSV_PATH.exists():
-        try:
-            local = validate_frame(pd.read_csv(CSV_PATH, encoding="utf-8-sig"))
-            if not local.empty:
-                return local, "部署容器本地数据（临时缓存）"
-        except Exception:
-            pass
-    return pd.DataFrame(columns=COLUMNS), "尚无持久化历史数据"
-
-
-def parse_uploaded_csv(file) -> pd.DataFrame:
-    raw = pd.read_csv(file)
-    return validate_frame(raw)
-
-
-@st.cache_data(ttl=1800, show_spinner=False)
-def cached_online_history():
-    return fetch_online_history()
-
-
-st.title("🎯 韩国 Lotto 6/45 AI 研究台")
-st.caption("数据质量 · 统计分析 · 多策略实验 · 样本外回测 | 研究与娱乐用途，不构成中奖预测")
-
-with st.sidebar:
-    st.header("数据中心")
-    st.markdown(f"[동행복권 官方结果核验]({OFFICIAL_RESULT_URL})")
-    if st.button("检查并刷新在线数据", use_container_width=True, type="primary"):
-        cached_online_history.clear()
-        try:
-            with st.spinner("正在读取官方结果页并核对备用历史镜像…"):
-                live_df, live_source, live_warnings = cached_online_history()
-            repo_df, repo_source = load_repo_history()
-            current = st.session_state.get("active_df", repo_df)
-            st.session_state["active_df"] = merge_histories(repo_df, current, live_df)
-            st.session_state["source"] = live_source
-            st.session_state["warnings"] = live_warnings
-            st.success(f"在线数据检查完成，最新收录第 {int(st.session_state['active_df']['draw_no'].max())} 期。")
-        except Exception as exc:
-            st.error(str(exc))
-    upload = st.file_uploader("导入开奖 CSV", type=["csv"])
-    if upload is not None and st.button("载入 CSV", use_container_width=True):
-        try:
-            imported = parse_uploaded_csv(upload)
-            if imported.empty:
-                st.error("CSV 中没有有效开奖记录。")
-            else:
-                st.session_state["active_df"] = imported
-                st.session_state["source"] = "用户导入 CSV"
-                st.session_state["warnings"] = []
-                st.success(f"载入 {len(imported)} 期记录。")
-        except Exception as exc:
-            st.error(f"CSV 格式错误：{exc}")
-    st.divider()
-    recent_window = st.selectbox("近期统计窗口", [30, 50, 100, 200, 500], index=2)
-    st.caption("统计窗口仅改变样本范围，不改变随机开奖概率。")
-
-# Load repository-tracked data first. If missing, bootstrap via online sources.
-df = st.session_state.get("active_df")
-source = st.session_state.get("source", "GitHub 仓库持久化历史数据")
-warnings = st.session_state.get("warnings", [])
-if df is None:
-    df, repo_source = load_repo_history()
-    source = repo_source
-    if not df.empty:
-        st.session_state["active_df"] = df
-        st.session_state["source"] = source
-    else:
-        try:
-            with st.spinner("首次启动：正在获取历史开奖记录…"):
-                online_df, source, warnings = cached_online_history()
-            df = online_df
-            st.session_state["active_df"] = df
-            st.session_state["source"] = source
-            st.session_state["warnings"] = warnings
-        except Exception as exc:
-            st.error(str(exc))
-            st.info("也可以先在左侧导入 CSV。CSV 至少需要 draw_no,n1,n2,n3,n4,n5,n6,bonus 字段。")
-            st.stop()
-
-if df is None or df.empty:
-    st.warning("暂无可分析数据。")
-    st.stop()
-df = validate_frame(df)
-source = st.session_state.get("source", source)
-warnings = st.session_state.get("warnings", warnings)
-quality = quality_report(df)
-latest = df.iloc[-1]
-recent = df.tail(min(recent_window, len(df)))
-
-if warnings:
-    with st.expander(f"数据源提醒（{len(warnings)}）", expanded=False):
-        for warning in warnings:
-            st.warning(warning)
-if quality["missing_draws"]:
-    st.warning(f"历史序列存在 {len(quality['missing_draws'])} 个缺失期数；回测结果可能受数据缺口影响。示例：{quality['missing_draws'][:12]}")
-if quality["date_errors"]:
-    st.warning(f"有 {quality['date_errors']} 条日期格式需要人工核验。")
-
-c1, c2, c3, c4 = st.columns(4)
-c1.metric("已收录期数", f"{quality['rows']:,}")
-c2.metric("最新期数", f"第 {quality['last_draw']} 期")
-c3.metric("最新开奖日期", str(latest["date"] or "未提供"))
-c4.metric("数据来源", source)
-st.caption(f"数据覆盖：第 {quality['first_draw']} 期至第 {quality['last_draw']} 期。官方结果页使用的 JSON 查询路径可能随网站改版而变化；如有差异，请以官方页面为准。")
-
-latest_nums = [int(latest[f"n{i}"]) for i in range(1, 7)]
-st.markdown("#### 最近一期开奖号码")
-ball_cols = st.columns(7)
-for i, n in enumerate(latest_nums):
-    ball_cols[i].markdown(f"<div style='background:#1769aa;color:white;border-radius:50%;width:42px;height:42px;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:16px;margin:auto'>{n:02d}</div>", unsafe_allow_html=True)
-ball_cols[6].markdown(f"<div style='text-align:center;padding-top:10px'>Bonus<br><b>{int(latest['bonus']):02d}</b></div>", unsafe_allow_html=True)
-
-# Tabs
-tabs = st.tabs(["数据质量", "号码统计", "组合结构", "关联号码", "多策略选号", "科学回测"])
-with tabs[0]:
-    st.subheader("数据完整性检查")
-    q1, q2, q3 = st.columns(3)
-    q1.metric("记录数量", f"{quality['rows']:,}")
-    q2.metric("缺失期数", len(quality["missing_draws"]))
-    q3.metric("日期格式异常", quality["date_errors"])
-    st.dataframe(df.tail(20).sort_values("draw_no", ascending=False), hide_index=True, use_container_width=True)
-    st.download_button("下载当前历史数据 CSV", df.to_csv(index=False).encode("utf-8-sig"),
-                       file_name="lotto645_history.csv", mime="text/csv")
+@st.cache_data(ttl=300, show_spinner=False)
+def load_repo_data() -> tuple[pd.DataFrame, dict]:
+    if not CSV_PATH.exists():
+        return pd.DataFrame(columns=COLUMNS), {}
+    raw = pd.read_csv(CSV_PATH)
+    status = {}
     if STATUS_PATH.exists():
         try:
-            import json
             status = json.loads(STATUS_PATH.read_text(encoding="utf-8"))
-            st.markdown("**最近一次 GitHub Actions 数据同步**")
-            st.json(status)
         except Exception:
-            st.caption("同步状态文件暂时无法读取。")
-    else:
-        st.info("自动同步工作流第一次运行后，会在这里显示同步时间和结果。")
+            status = {}
+    return validate_frame(raw), status
 
-with tabs[1]:
-    st.subheader("号码出现频率与标准化偏差")
-    freq = frequency_table(recent).sort_values("号码")
-    f1, f2 = st.columns([2, 1])
-    with f1:
-        fig = px.bar(freq, x="号码", y="出现次数", title=f"最近 {len(recent)} 期号码频率")
-        fig.add_hline(y=len(recent) * 6 / 45, line_dash="dash", annotation_text="理论期望")
-        fig.update_layout(height=420, xaxis=dict(dtick=2))
-        st.plotly_chart(fig, use_container_width=True)
-    with f2:
-        st.markdown("**频率最高的号码（描述性）**")
-        st.dataframe(freq.sort_values("出现次数", ascending=False).head(10), hide_index=True, use_container_width=True)
-        st.markdown("**标准化偏差较大的号码**")
-        st.dataframe(freq.reindex(freq["标准化偏差Z"].abs().sort_values(ascending=False).index).head(10), hide_index=True, use_container_width=True)
-    st.caption("Z 值与近似 P 值仅作探索性描述；同时查看 45 个号码会产生多重比较问题，不能据此确认存在可利用的偏差。")
-    st.subheader("遗漏期数")
-    gaps = gap_table(df).sort_values("号码")
-    fig2 = px.bar(gaps, x="号码", y="距最近出现期数", title="各号码距离最近一次出现的期数")
-    fig2.update_layout(height=360, xaxis=dict(dtick=2))
-    st.plotly_chart(fig2, use_container_width=True)
-    st.caption("遗漏只表示最近一次出现距今多少期，不表示号码更可能在下一期出现。")
 
-with tabs[2]:
-    features = draw_features(df)
-    st.subheader("和值、奇偶与区间结构")
-    a, b = st.columns(2)
-    with a:
-        st.plotly_chart(px.histogram(features, x="和值", nbins=25, title="历史和值分布"), use_container_width=True)
-    with b:
-        odd = features["奇数个数"].value_counts().reindex(range(7), fill_value=0).rename_axis("奇数个数").reset_index(name="期数")
-        st.plotly_chart(px.bar(odd, x="奇数个数", y="期数", title="每期奇数个数分布"), use_container_width=True)
-    c, d = st.columns(2)
-    with c:
-        high = features["高区个数(23-45)"].value_counts().reindex(range(7), fill_value=0).rename_axis("高区个数").reset_index(name="期数")
-        st.plotly_chart(px.bar(high, x="高区个数", y="期数", title="高区号码（23—45）数量分布"), use_container_width=True)
-    with d:
-        runs = features["连号对数"].value_counts().sort_index().rename_axis("连号对数").reset_index(name="期数")
-        st.plotly_chart(px.bar(runs, x="连号对数", y="期数", title="每期连号对数分布"), use_container_width=True)
-    st.dataframe(features.tail(20).sort_values("期数", ascending=False), hide_index=True, use_container_width=True)
+df, sync_status = load_repo_data()
+if df.empty:
+    st.error("还没有找到官方历史开奖数据库。先到 GitHub 仓库的 Actions，运行 ‘同步韩国官方 Lotto 历史数据’ 工作流。同步成功后，data/lotto645.csv 会自动提交到仓库，Streamlit 随后重新加载。")
+    st.markdown(f"官方开奖查询：[{OFFICIAL_RESULT_URL}]({OFFICIAL_RESULT_URL})")
+    if sync_status:
+        st.json(sync_status)
+    st.stop()
 
-with tabs[3]:
-    scope = st.radio("共现统计范围", ["全部历史", f"最近 {len(recent)} 期"], horizontal=True)
-    source_df = df if scope == "全部历史" else recent
-    st.subheader("两数组合共现")
-    st.dataframe(pair_table(source_df, 30), hide_index=True, use_container_width=True)
-    st.caption("理论上指定两数同期开出的概率为 1/66。偏离值是探索性统计，未校正对 990 对号码的多重比较。")
+quality = quality_report(df)
+last = df.iloc[-1]
+last_nums = [int(last[f"n{i}"]) for i in range(1, 7)]
 
-with tabs[4]:
-    st.subheader("多策略候选号码实验室")
-    st.warning("候选组合不是预测。公平独立开奖时，任意一组具体六号码的头奖概率均为 1/8,145,060。")
-    models = ["均匀随机基准", "近期频率倾向（实验）", "指数时间衰减（实验）", "遗漏倾向（实验）", "结构约束随机（实验）"]
-    col_a, col_b = st.columns(2)
-    with col_a:
-        count = st.slider("生成组数", 1, 10, 5)
-        model = st.selectbox("生成策略", models, index=0)
-        window = st.select_slider("策略使用的历史窗口", options=[30, 50, 100, 200, 500], value=100)
-    with col_b:
-        overlap = st.slider("任意两组最多共享号码数", 0, 5, 3)
-        seed_text = st.text_input("随机种子（留空则每次不同）", value="")
-        seed = None
-        if seed_text.strip():
-            try:
-                seed = int(seed_text.strip())
-            except ValueError:
-                st.error("随机种子必须是整数。")
-    if st.button("生成候选组合", type="primary", key="generate_v2"):
+if sync_status.get("status") == "failed":
+    st.warning("最近一次官方数据同步失败。当前页面使用仓库中上一次成功保存的数据；请查看数据状态详情。")
+
+m1, m2, m3, m4 = st.columns(4)
+m1.metric("官方历史记录", f"{quality['rows']:,} 期")
+m2.metric("最新期数", f"第 {quality['last_draw']} 期")
+m3.metric("最新开奖日期", str(last["date"] or "未提供"))
+m4.metric("历史序列", "完整" if quality["sequence_complete"] else f"缺 {len(quality['missing_draws'])} 期")
+
+st.markdown("### 最近一期官方开奖号码")
+ball_cols = st.columns(7)
+for i, n in enumerate(last_nums):
+    ball_cols[i].markdown(
+        f"<div style='background:#1769aa;color:white;border-radius:50%;width:44px;height:44px;display:flex;align-items:center;justify-content:center;font-weight:700;margin:auto'>{n:02d}</div>",
+        unsafe_allow_html=True,
+    )
+ball_cols[6].markdown(f"<div style='text-align:center;padding-top:10px'>Bonus<br><b>{int(last['bonus']):02d}</b></div>", unsafe_allow_html=True)
+
+if not quality["sequence_complete"]:
+    st.warning(f"历史数据不是从第 1 期连续覆盖。缺失期示例：{quality['missing_draws'][:20]}。建议先重新运行官方数据同步。")
+
+st.caption(f"数据来源：{sync_status.get('source', '仓库历史数据')}；同步时间：{sync_status.get('updated_at_utc', '未知')}。官方站点页面接口不是稳定承诺的开放 API。")
+
+tabs = st.tabs(["V3 号码预测", "历史数据分析", "模型回测", "数据完整性", "选号复盘"])
+
+with tabs[0]:
+    st.subheader("历史数据驱动的候选号码")
+    st.warning("候选号码是模型按历史样本偏好生成的研究结果，不是中奖概率预测。公平独立开奖时，任意一组具体六号码的头奖概率都是 1/8,145,060。")
+    left, right = st.columns([1, 1])
+    with left:
+        model = st.selectbox("选号模型", MODEL_NAMES, index=4)
+        window_label = st.selectbox("历史数据窗口", ["最近30期", "最近50期", "最近100期", "最近200期", "最近500期", "全部历史"], index=2)
+        window = None if window_label == "全部历史" else int(window_label.replace("最近", "").replace("期", ""))
+    with right:
+        count = st.slider("生成候选组数", 1, 20, 10)
+        overlap = st.slider("任意两组最多共享号码数", 0, 5, 4)
+        seed_text = st.text_input("随机种子（留空则每次不同）", "")
+    seed = None
+    if seed_text.strip():
         try:
-            generated, relaxed = generate_candidates(df, count, model, window, overlap, seed)
-            st.session_state["generated_v2"] = generated
-            st.session_state["generated_v2_relaxed"] = relaxed
+            seed = int(seed_text.strip())
+        except ValueError:
+            st.error("随机种子必须是整数。")
+    if st.button("生成 V3 候选号码", type="primary", use_container_width=True):
+        try:
+            with st.spinner("正在根据所选历史窗口计算模型权重并生成候选号码…"):
+                generated, relaxed = generate_candidates(df, count, model, window or len(df), overlap, seed)
+            st.session_state["v3_candidates"] = generated
+            st.session_state["v3_relaxed"] = relaxed
+            st.session_state["v3_model"] = model
+            st.session_state["v3_window"] = window_label
         except Exception as exc:
             st.error(f"生成失败：{exc}")
-    generated = st.session_state.get("generated_v2")
+    generated = st.session_state.get("v3_candidates")
     if generated is not None:
-        st.dataframe(generated[["组别", "生成策略", "号码展示", "和值", "奇偶比", "历史频率指数", "与其他组合最大重号"]], hide_index=True, use_container_width=True)
-        if st.session_state.get("generated_v2_relaxed"):
-            st.warning("重号限制过严，已放宽限制以补足组数；请以表格显示的实际重号数为准。")
-        st.download_button("下载候选号码 CSV", generated.to_csv(index=False).encode("utf-8-sig"),
-                           file_name="lotto645_candidates.csv", mime="text/csv")
-        with st.expander("本次统计解读"):
-            for line in insights(df, recent_window):
-                st.write("• " + line)
+        st.markdown(f"#### 候选结果：{st.session_state.get('v3_model')} · {st.session_state.get('v3_window')}")
+        st.dataframe(generated.drop(columns=["号码列表"]), hide_index=True, use_container_width=True)
+        if st.session_state.get("v3_relaxed"):
+            st.info("为满足候选组数，程序放宽了跨组重号限制。")
+        st.download_button("下载候选号码 CSV", generated.drop(columns=["号码列表"]).to_csv(index=False).encode("utf-8-sig"),
+                           "lotto645_v3_candidates.csv", "text/csv")
+        st.caption("模型相对得分只反映所选算法下号码的相对偏好，经当前样本缩放；不是单号或组合的中奖概率。")
+    st.markdown("#### 五类模型的号码相对评分")
+    selected_window = len(df) if window is None else min(window, len(df))
+    score_table = number_score_table(df, selected_window)
+    fig = px.bar(score_table.sort_values("号码"), x="号码", y="综合相对得分", title="45 个号码的综合相对评分（0—100）")
+    fig.update_layout(height=360, xaxis=dict(dtick=2))
+    st.plotly_chart(fig, use_container_width=True)
+    st.dataframe(score_table.head(15).round(3), hide_index=True, use_container_width=True)
 
-with tabs[5]:
-    st.subheader("滚动样本外回测")
-    st.write("每个测试期只使用此前开奖数据构建策略；同一测试期比较随机基准、近期频率、指数时间衰减。")
-    ca, cb, cc = st.columns(3)
-    with ca:
-        lookback = st.selectbox("训练窗口", [50, 100, 150, 200], index=1)
-    with cb:
-        max_tests = max(50, min(300, len(df) - lookback))
-        test_count = st.slider("最近测试期数", 50, max_tests, min(150, max_tests))
-    with cc:
-        seed_count = st.selectbox("随机种子组数", [3, 5, 10], index=1)
-    tickets_per_draw = st.selectbox("每期每策略生成注数", [3, 5, 10], index=1)
-    if st.button("运行多模型回测", type="primary", key="backtest_v2"):
-        with st.spinner("正在执行滚动样本外回测与按期 Bootstrap…"):
-            raw, summary = run_backtest(df, lookback, test_count, tickets_per_draw, seed_count)
-            st.session_state["bt_v2_raw"] = raw
-            st.session_state["bt_v2_summary"] = summary
-    summary = st.session_state.get("bt_v2_summary")
-    raw = st.session_state.get("bt_v2_raw")
+with tabs[1]:
+    st.subheader("官方历史数据统计")
+    col_a, col_b = st.columns([1, 2])
+    with col_a:
+        stat_scope = st.selectbox("统计窗口", ["最近30期", "最近50期", "最近100期", "最近200期", "最近500期", "全部历史"], index=2, key="stat_scope")
+    stat_n = len(df) if stat_scope == "全部历史" else int(stat_scope.replace("最近", "").replace("期", ""))
+    sample = df.tail(min(stat_n, len(df)))
+    freq = frequency_table(sample)
+    gap = gap_table(df)
+    with col_b:
+        st.caption(f"统计范围：第 {int(sample.iloc[0]['draw_no'])} 期至第 {int(sample.iloc[-1]['draw_no'])} 期，共 {len(sample)} 期")
+    a, b = st.columns(2)
+    with a:
+        chart = px.bar(freq.sort_values("号码"), x="号码", y="出现次数", title="号码出现频率")
+        chart.add_hline(y=len(sample) * 6 / 45, line_dash="dash", annotation_text="理论期望")
+        chart.update_layout(height=400, xaxis=dict(dtick=2))
+        st.plotly_chart(chart, use_container_width=True)
+    with b:
+        st.markdown("**出现次数靠前的号码**")
+        st.dataframe(freq.head(12), hide_index=True, use_container_width=True)
+        st.markdown("**当前遗漏较长的号码（仅描述）**")
+        st.dataframe(gap.head(10), hide_index=True, use_container_width=True)
+    features = draw_features(sample)
+    c, d = st.columns(2)
+    with c:
+        st.plotly_chart(px.histogram(features, x="和值", nbins=25, title="历史和值分布"), use_container_width=True)
+    with d:
+        odd = features["奇数个数"].value_counts().reindex(range(7), fill_value=0).rename_axis("奇数个数").reset_index(name="期数")
+        st.plotly_chart(px.bar(odd, x="奇数个数", y="期数", title="奇数个数分布"), use_container_width=True)
+    st.markdown("**两数组合历史共现次数**")
+    st.dataframe(pair_table(sample, 30), hide_index=True, use_container_width=True)
+    st.download_button("下载官方历史 CSV", df.to_csv(index=False).encode("utf-8-sig"), "lotto645_official_history.csv", "text/csv")
+
+with tabs[2]:
+    st.subheader("多模型滚动样本外回测")
+    st.write("每次测试一期开奖结果时，模型只能看到该期之前的数据；模型与随机基准在相同测试期进行比较。")
+    x, y, z = st.columns(3)
+    with x:
+        lookback = st.selectbox("训练窗口", [50, 100, 150, 200, 300, 500], index=3)
+    with y:
+        max_test = max(10, min(150, len(df) - lookback))
+        test_count = st.slider("最近测试期数", 10, max_test, min(80, max_test))
+    with z:
+        seeds = st.selectbox("随机种子组数", [1, 3, 5], index=1)
+    tickets = st.selectbox("每期每模型模拟注数", [1, 3, 5, 10], index=2)
+    if st.button("运行样本外回测", type="primary", use_container_width=True):
+        with st.spinner("回测中。每个历史测试期仅使用此前数据…"):
+            raw, summary = run_backtest(df, lookback, test_count, tickets, seeds)
+        st.session_state["v3_bt_raw"] = raw
+        st.session_state["v3_bt_summary"] = summary
+    summary = st.session_state.get("v3_bt_summary")
+    raw = st.session_state.get("v3_bt_raw")
     if summary is not None and not summary.empty:
-        display = summary.copy()
-        for c in ["平均命中数", "平均命中差值_vs随机", "平均命中差值95%CI下限", "平均命中差值95%CI上限"]:
-            display[c] = display[c].round(4)
-        for c in ["3个以上命中率", "4个以上命中率", "5个以上命中率", "6个命中率", "3+率差值_vs随机", "3+率差值95%CI下限", "3+率差值95%CI上限"]:
-            display[c] = (display[c] * 100).round(3).astype(str) + "%"
-        st.dataframe(display, hide_index=True, use_container_width=True)
-        fig = px.histogram(raw, x="命中数", color="策略", barmode="group", histnorm="probability", title="各策略单注命中数分布")
-        st.plotly_chart(fig, use_container_width=True)
-        st.info("解读：比较模型相对随机基准的差值及 95% Bootstrap 区间。区间若覆盖 0，不能据此认定模型优于随机；即使不覆盖 0，也只表示这段历史样本的表现，不保证未来。")
-        st.download_button("下载完整回测明细 CSV", raw.to_csv(index=False).encode("utf-8-sig"),
-                           file_name="lotto645_backtest_v2.csv", mime="text/csv")
+        view = summary.copy()
+        for col in ["平均命中数", "平均命中差_vs随机", "平均命中差95%CI下限", "平均命中差95%CI上限"]:
+            view[col] = view[col].round(4)
+        for col in ["3个以上命中率", "4个以上命中率", "5个以上命中率", "6个命中率"]:
+            view[col] = (view[col] * 100).round(3).astype(str) + "%"
+        st.dataframe(view, hide_index=True, use_container_width=True)
+        st.plotly_chart(px.histogram(raw, x="命中数", color="策略", barmode="group", histnorm="probability", title="各模型单注命中数分布"), use_container_width=True)
+        st.info("重点看模型相对随机基准的平均命中差及 95% Bootstrap 区间。区间跨过 0 时，没有证据表明该模型优于随机。回测领先也不代表未来领先。")
+        st.download_button("下载回测明细", raw.to_csv(index=False).encode("utf-8-sig"), "lotto645_v3_backtest.csv", "text/csv")
     else:
-        st.caption(f"建议至少有 {lookback + 6} 期有效记录。当前收录 {len(df)} 期。")
+        st.caption(f"建议至少准备 {lookback + 6} 期连续历史数据。当前数据：{len(df)} 期。")
+
+with tabs[3]:
+    st.subheader("数据来源与完整性")
+    q1, q2, q3 = st.columns(3)
+    q1.metric("数据记录", quality["rows"])
+    q2.metric("缺失期数", len(quality["missing_draws"]))
+    q3.metric("日期异常", quality["date_errors"])
+    st.write({"首期": quality["first_draw"], "末期": quality["last_draw"], "从第1期开始连续": quality["sequence_complete"]})
+    if quality["missing_draws"]:
+        st.error(f"缺失期号：{quality['missing_draws'][:50]}")
+    st.markdown("**最近一次官方同步状态**")
+    st.json(sync_status if sync_status else {"status": "未找到同步状态文件"})
+    st.markdown(f"官方查询页面：[동행복권 Lotto 6/45]({OFFICIAL_RESULT_URL})")
+    st.download_button("下载同步状态 JSON", json.dumps(sync_status, ensure_ascii=False, indent=2), "lotto645_sync_status.json", "application/json")
+
+with tabs[4]:
+    st.subheader("自选号码历史复盘")
+    raw_ticket = st.text_input("输入 6 个号码（逗号、空格分隔）", placeholder="例如：3, 11, 18, 27, 34, 42")
+    if st.button("复盘这组号码"):
+        try:
+            values = [int(x) for x in raw_ticket.replace("，", ",").replace(" ", ",").split(",") if x.strip()]
+            result = compare_ticket_to_history(df, values)
+            st.write(f"检验期数：{result['draws_checked']}；历史最高命中：{result['max_hits']}；平均命中：{result['mean_hits']:.3f}")
+            dist = pd.DataFrame([{"命中号码数": k, "历史期数": v} for k, v in result["hit_distribution"].items()])
+            st.dataframe(dist, hide_index=True, use_container_width=True)
+        except Exception as exc:
+            st.error(str(exc))
 
 st.divider()
-st.markdown("**统计原则**：在公平且各期独立的 Lotto 6/45 抽奖机制下，历史频率、遗漏、号码共现和结构分布不会改变下一期的理论概率。这里的模型用于比较选号规则的历史行为，不构成投注建议。")
-st.markdown(f"数据查询参考：[동행복권 官方结果页]({OFFICIAL_RESULT_URL})；官方站点接口是页面使用的公开 JSON 查询路径，并非承诺长期稳定的正式开放 API。备用历史数据：[Smok95 公开数据镜像](https://github.com/smok95/lotto)。")
+metrics = theoretical_random_metrics()
+st.caption(
+    f"统计边界：每注理论平均命中主号码数为 {metrics['mean_hits_per_ticket']:.1f}；"
+    f"至少命中3个主号码的理论概率约为 {metrics['p3plus']:.2%}；"
+    f"头奖概率为 1/{int(1 / metrics['jackpot_probability']):,}。历史数据不能改变公平独立开奖的理论概率。"
+)
+st.caption("数据策略：只把官方结果页 JSON 作为历史数据源；官方接口失败时保留旧数据并报告错误，不以第三方镜像静默补齐。")
