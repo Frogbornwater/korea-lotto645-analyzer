@@ -31,22 +31,41 @@ jobs:
 
       - name: Fetch and validate official draw history
         id: sync
-        run: python sync_data.py
+        shell: bash
+        run: |
+          python -u sync_data.py
+          python - <<'PY'
+          import json
+          from pathlib import Path
 
-      # Always publish sync_status.json when the sync script has created it.
-      # Do not require lotto645.csv to exist: a failed first sync may not create it.
+          csv_path = Path("data/lotto645.csv")
+          status_path = Path("data/sync_status.json")
+          if not csv_path.is_file():
+              raise SystemExit("同步脚本退出码为 0，但没有生成 data/lotto645.csv")
+          if not status_path.is_file():
+              raise SystemExit("同步脚本没有生成 data/sync_status.json")
+          status = json.loads(status_path.read_text(encoding="utf-8"))
+          if status.get("status") != "success":
+              raise SystemExit(f"官方数据同步状态不是 success：{status}")
+          if int(status.get("rows", 0)) <= 0:
+              raise SystemExit("同步状态显示 success，但 CSV 记录数为 0")
+          print(
+              f"验证通过：{status['rows']} 期，覆盖第 {status['first_draw']} 期至第 {status['last_draw']} 期。",
+              flush=True,
+          )
+          PY
+
+      # This step runs even if sync_data.py fails, so the failure status JSON
+      # is committed and visible in the Streamlit app. The CSV is only changed
+      # by sync_data.py after a complete, validated fetch.
       - name: Commit data and sync status
         if: always() && steps.checkout.outcome == 'success'
-        shell: bash
         run: |
           if [ -d data ]; then
             git add -A data/
-          else
-            echo "No data directory was created by the sync step."
           fi
-
           if git diff --cached --quiet; then
-            echo "No data or sync status changes to commit."
+            echo "No data or status changes to commit."
           else
             git config user.name "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
