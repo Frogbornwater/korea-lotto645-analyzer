@@ -34,6 +34,7 @@ def _make_weights(
     half_life: float,
     bayes_prior: float,
     ensemble_weights: tuple[float, float, float],
+    multi_model_weights: tuple[float, float, float] = (0.40, 0.35, 0.25),
 ) -> np.ndarray:
     """Build strategy weights using strictly pre-target historical rows."""
     if len(all_past) == 0:
@@ -75,6 +76,22 @@ def _make_weights(
             + c * _smoothed_frequency(long, 80.0)
         )
         return np.maximum(result, 1e-12)
+
+    if strategy == "多模型集成模型":
+        recent = all_past[-min(max(1, recent_window), len(all_past)):]
+        recent_weights = _smoothed_frequency(recent, 8.0)
+        bayes_weights = _smoothed_frequency(all_past, bayes_prior)
+        hl = max(float(half_life), 1.0)
+        ages = np.arange(len(all_past) - 1, -1, -1, dtype=float)
+        decay = np.exp(-ages / hl)
+        decayed = np.zeros(45, dtype=float)
+        for row, weight in zip(all_past, decay):
+            decayed[row - 1] += weight
+        decayed += 40.0 * PRIOR_RATE
+        a, b, c = multi_model_weights
+        if not math.isclose(a + b + c, 1.0, rel_tol=0, abs_tol=1e-8):
+            raise ValueError("多模型集成的三个权重之和必须等于1。")
+        return np.maximum(a * recent_weights + b * bayes_weights + c * decayed, 1e-12)
 
     raise ValueError(f"未注册的回测策略：{strategy}")
 
@@ -198,6 +215,7 @@ def run_backtest(
     half_life: float = 40.0,
     bayes_prior: float = 80.0,
     ensemble_weights: tuple[float, float, float] = (0.40, 0.35, 0.25),
+    multi_model_weights: tuple[float, float, float] = (0.40, 0.35, 0.25),
     bootstrap_reps: int = 5000,
     signflip_reps: int = 10000,
     data_source_label: str = "用户手动提供的历史数据",
@@ -279,7 +297,7 @@ def run_backtest(
                 )
                 rng = np.random.default_rng(strategy_seed)
                 weights = _make_weights(
-                    all_past, strategy, recent_window, half_life, bayes_prior, ensemble_weights
+                    all_past, strategy, recent_window, half_life, bayes_prior, ensemble_weights, multi_model_weights
                 )
                 bounds = structure_bounds if strategy == "历史结构约束模型" else None
                 tickets = _draw_tickets(rng, weights, tickets_per_draw, bounds)
@@ -432,6 +450,7 @@ def run_backtest(
         "half_life": float(half_life),
         "bayes_prior": float(bayes_prior),
         "ensemble_weights": list(ensemble_weights),
+        "multi_model_weights": list(multi_model_weights),
         "bootstrap_reps": bootstrap_reps,
         "signflip_reps": signflip_reps,
         "multiple_testing_correction": "Holm；对各非随机模型分别按平均命中差、单注3+率差、整批3+率差三项进行家族内校正。",

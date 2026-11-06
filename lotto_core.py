@@ -26,6 +26,7 @@ MODEL_NAMES = [
     "综合评分模型",
     "历史结构约束模型",
     "均匀随机基准",
+    "多模型集成模型",
 ]
 
 
@@ -199,7 +200,12 @@ def _counts_for_window(df: pd.DataFrame, window: int | None) -> tuple[np.ndarray
     return counts, len(sample)
 
 
-def model_weights(df: pd.DataFrame, model: str, window: int = 100, half_life: float = 40.0) -> np.ndarray:
+def model_weights(
+    df: pd.DataFrame, model: str, window: int = 100, half_life: float = 40.0,
+    bayes_prior: float = 80.0,
+    ensemble_weights: tuple[float, float, float] = (0.40, 0.35, 0.25),
+    multi_model_weights: tuple[float, float, float] = (0.40, 0.35, 0.25),
+) -> np.ndarray:
     """Return relative number weights aligned with V3.6 backtest definitions.
 
     Weights are descriptive sampling weights, never calibrated draw probabilities.
@@ -221,7 +227,7 @@ def model_weights(df: pd.DataFrame, model: str, window: int = 100, half_life: fl
     if model == "长期频率模型":
         return np.maximum(smooth(rows, 40.0), 1e-8)
     if model == "贝叶斯平滑模型":
-        return np.maximum(smooth(rows, 80.0), 1e-8)
+        return np.maximum(smooth(rows, float(bayes_prior)), 1e-8)
     if model == "指数时间衰减模型":
         ages = np.arange(len(rows) - 1, -1, -1, dtype=float)
         decay = np.exp(-ages / max(float(half_life), 1.0))
@@ -233,12 +239,28 @@ def model_weights(df: pd.DataFrame, model: str, window: int = 100, half_life: fl
         short = smooth(rows[-min(50, len(rows)):], 20.0)
         medium = smooth(rows[-min(200, len(rows)):], 40.0)
         long = smooth(rows, 80.0)
-        return np.maximum(0.40 * short + 0.35 * medium + 0.25 * long, 1e-8)
+        a, b, c = ensemble_weights
+        if not np.isclose(a + b + c, 1.0, atol=1e-8):
+            raise ValueError("综合评分模型的三个权重之和必须等于1。")
+        return np.maximum(a * short + b * medium + c * long, 1e-8)
+    if model == "多模型集成模型":
+        recent = smooth(rows[-min(recent_window, len(rows)):], 8.0)
+        bayes = smooth(rows, float(bayes_prior))
+        ages = np.arange(len(rows) - 1, -1, -1, dtype=float)
+        decay = np.exp(-ages / max(float(half_life), 1.0))
+        decayed = np.zeros(45, dtype=float)
+        for draw, weight in zip(rows, decay):
+            decayed[draw - 1] += weight
+        decayed += 40.0 * prior_rate
+        a, b, c = multi_model_weights
+        if not np.isclose(a + b + c, 1.0, atol=1e-8):
+            raise ValueError("多模型集成的三个权重之和必须等于1。")
+        return np.maximum(a * recent + b * bayes + c * decayed, 1e-8)
     raise ValueError(f"未知选号模型：{model}")
 
 def number_score_table(df: pd.DataFrame, window: int = 100) -> pd.DataFrame:
     rows = []
-    models = ["近期频率模型", "长期频率模型", "指数时间衰减模型", "贝叶斯平滑模型", "综合评分模型"]
+    models = ["近期频率模型", "长期频率模型", "指数时间衰减模型", "贝叶斯平滑模型", "综合评分模型", "多模型集成模型"]
     weights = {m: model_weights(df, m, window) for m in models}
     for i in range(45):
         values = [float(weights[m][i]) for m in models]

@@ -2,7 +2,7 @@
 """Model registry and version metadata for Lotto 6/45 V3.6."""
 from __future__ import annotations
 
-ENGINE_VERSION = "3.6.0-phase1"
+ENGINE_VERSION = "3.6.1-full"
 MODEL_DEFINITIONS = [
     {
         "name": "近期频率模型",
@@ -59,6 +59,14 @@ MODEL_DEFINITIONS = [
         "family": "对照基准",
         "description": "从45个号码中等概率、不放回抽取6个号码，永久保留为对照。",
         "status": "基准",
+    },
+    {
+        "name": "多模型集成模型",
+        "key": "multi_model_ensemble",
+        "version": "1.0",
+        "family": "模型集成",
+        "description": "融合近期频率、贝叶斯平滑和指数时间衰减三类统计权重；权重仅为历史抽样权重。",
+        "status": "实验",
     },
 ]
 MODEL_NAMES = [item["name"] for item in MODEL_DEFINITIONS]

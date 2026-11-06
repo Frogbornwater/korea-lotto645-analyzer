@@ -11,20 +11,28 @@ import plotly.express as px
 import streamlit as st
 
 from backtest_engine import run_backtest, run_multi_window_backtest
+from parameter_optimizer import (
+    SEARCHABLE_MODELS, evaluate_reserved_holdout, run_parameter_search,
+)
+from portfolio_optimizer import optimize_portfolio
+from model_management import (
+    MODEL_STATUSES, add_experiment, change_model_status, export_project_state,
+    import_project_state, new_project_state,
+)
 from data_manager import load_repository_history, read_manual_upload
 from lotto_core import (
     COLUMNS, MODEL_NAMES, compare_ticket_to_history, draw_features, frequency_table,
     gap_table, generate_candidates, number_score_table, pair_table, quality_report,
     theoretical_random_metrics, validate_frame,
 )
-from model_registry import ENGINE_VERSION, get_model_registry
+from model_registry import ENGINE_VERSION
 
 APP_DIR = Path(__file__).resolve().parent
 DATA_DIR = APP_DIR / "data"
 HISTORY_PATH = DATA_DIR / "lotto645.csv"
 
-st.set_page_config(page_title="Lotto 6/45 V3.6 · 离线分析实验室", page_icon="🎯", layout="wide")
-st.title("🎯 韩国 Lotto 6/45 · V3.6 离线分析实验室")
+st.set_page_config(page_title="Lotto 6/45 V3.6.1 · 离线分析实验室", page_icon="🎯", layout="wide")
+st.title("🎯 韩国 Lotto 6/45 · V3.6.1 综合分析实验室")
 st.caption("手动历史数据导入｜多模型分析｜可复现滚动回测｜研究与娱乐用途")
 
 
@@ -81,8 +89,11 @@ m3.metric("最新开奖日期", str(last["date"] or "未提供"))
 m4.metric("历史序列", "从第1期连续" if quality["sequence_complete"] else f"缺{len(quality['missing_draws'])}期")
 st.caption(f"数据来源：{data_source}｜引擎版本：{ENGINE_VERSION}｜数据仅由用户手动提供")
 
-page_overview, page_pick, page_stats, page_backtest, page_models, page_data, page_review = st.tabs([
-    "系统总览", "智能选号", "历史统计", "回测中心", "模型登记", "数据管理", "选号复盘"
+if "v36_project_state" not in st.session_state:
+    st.session_state["v36_project_state"] = new_project_state()
+
+page_overview, page_pick, page_stats, page_backtest, page_optimizer, page_ensemble, page_portfolio, page_models, page_data, page_review = st.tabs([
+    "系统总览", "智能选号", "历史统计", "回测中心", "参数实验室", "模型集成", "组合优化", "模型管理", "数据管理", "选号复盘"
 ])
 
 with page_overview:
@@ -102,7 +113,7 @@ with page_overview:
     overview_cols[0].metric("已注册策略", len(MODEL_NAMES))
     overview_cols[1].metric("每次默认候选组数", 10)
     overview_cols[2].metric("外部数据连接", "未启用")
-    st.info("V3.6 第一阶段已拆分独立回测引擎，增加模型版本登记、每注号码留档和回测实验元数据。模型表现只用于统计研究，不代表下一期开奖概率。")
+    st.info("V3.6.1 集成参数搜索、多模型集成、10组组合多样性优化和可导出的模型实验档案。模型表现只用于统计研究，不代表下一期开奖概率。")
 
 with page_pick:
     st.subheader("生成10组候选号码")
@@ -113,7 +124,8 @@ with page_pick:
         window_label = st.selectbox("近期数据窗口", ["最近30期", "最近50期", "最近100期", "最近200期", "最近500期", "全部历史"], index=2)
         window = None if window_label == "全部历史" else int(window_label.replace("最近", "").replace("期", ""))
     with right:
-        count = st.selectbox("生成组数", [10, 5, 20], index=0)
+        count = 10
+        st.metric("本次候选组合数量", "10组")
         overlap = st.slider("任意两组最多共享号码数", 0, 5, 4)
         seed_text = st.text_input("随机种子（留空则每次不同）", "")
     if st.button("生成候选号码", type="primary", use_container_width=True):
@@ -234,6 +246,11 @@ with page_backtest:
                 st.session_state["v36_bt_metadata"] = metadata
             st.session_state["v36_bt_raw"] = raw
             st.session_state["v36_bt_summary"] = summary
+            state_now = st.session_state.get("v36_project_state", new_project_state())
+            st.session_state["v36_project_state"] = add_experiment(
+                state_now, "常规回测", metadata if isinstance(metadata, dict) else {"experiment_type": "multi_window_backtest", "data_first_draw": int(df["draw_no"].min()), "data_last_draw": int(df["draw_no"].max())},
+                summary.to_dict(orient="records"),
+            )
             status.success(f"回测完成：{len(raw):,}条明细，耗时 {metadata.get('elapsed_seconds', 0):.2f} 秒。") if isinstance(metadata, dict) else status.success(f"多窗口回测完成：{len(raw):,}条明细。")
         except Exception as exc:
             st.error(f"回测失败：{type(exc).__name__}: {exc}")
@@ -274,11 +291,245 @@ with page_backtest:
             with st.expander("查看各窗口实验参数"):
                 st.json(metadata)
 
+with page_optimizer:
+    st.subheader("自动参数优化实验室")
+    st.warning("参数排名属于探索性搜索。最新保留区间不会参与参数搜索；搜索结果排名第一不等于显著优于随机。")
+    model_target = st.selectbox("要优化的模型", SEARCHABLE_MODELS, index=0, key="v361_param_model")
+    valid_train = [w for w in [50, 100, 150, 200, 300, 500] if w + 12 < len(df)]
+    if not valid_train:
+        st.info("历史期数不足，暂时无法运行参数实验。")
+    else:
+        c1, c2, c3, c4 = st.columns(4)
+        with c1:
+            min_train = st.selectbox("最低训练期数", valid_train, index=valid_train.index(200) if 200 in valid_train else len(valid_train)-1, key="v361_min_train")
+        with c2:
+            max_holdout = max(10, min(100, len(df) - min_train - 3))
+            holdout_n = st.slider("保留验证期数", 10, max_holdout, min(40, max_holdout), key="v361_holdout")
+        with c3:
+            max_validation = max(2, min(100, len(df) - min_train - holdout_n - 1))
+            validation_n = st.slider("参数搜索验证期数", 2, max_validation, min(40, max_validation), key="v361_validation")
+        with c4:
+            search_seeds = st.selectbox("每期随机种子组", [1, 2, 3], index=1, key="v361_search_seeds")
+        s1, s2 = st.columns(2)
+        with s1:
+            search_tickets = st.selectbox("每期每模型模拟注数", [3, 5, 10], index=1, key="v361_search_tickets")
+        with s2:
+            search_seed = st.number_input("参数搜索基础种子", min_value=0, max_value=2_000_000_000, value=2026, step=1, key="v361_search_seed")
+        if st.button("开始参数搜索", type="primary", use_container_width=True, key="v361_run_search"):
+            bar = st.progress(0, text="准备参数实验…")
+            try:
+                def search_progress(done: int, total: int):
+                    bar.progress(min(1.0, done / max(total, 1)), text=f"参数实验进度：{done:,}/{total:,}")
+                result_detail, result_table, result_meta = run_parameter_search(
+                    df, model_target, min_train=min_train, validation_draws=validation_n,
+                    holdout_draws=holdout_n, tickets_per_draw=search_tickets,
+                    n_seeds=search_seeds, seed=int(search_seed), progress_callback=search_progress,
+                )
+                st.session_state["v361_param_detail"] = result_detail
+                st.session_state["v361_param_summary"] = result_table
+                st.session_state["v361_param_meta"] = result_meta
+                st.session_state["v361_param_context"] = {
+                    "model": model_target, "min_train": min_train, "holdout": holdout_n,
+                    "tickets": search_tickets, "seeds": search_seeds, "seed": int(search_seed),
+                }
+                compact = result_table.head(10).to_dict(orient="records")
+                st.session_state["v36_project_state"] = add_experiment(
+                    st.session_state["v36_project_state"], "参数搜索", result_meta, compact,
+                )
+                st.success(f"参数搜索完成：{len(result_table)}组参数，耗时{result_meta['elapsed_seconds']:.2f}秒。")
+            except Exception as exc:
+                st.error(f"参数搜索失败：{type(exc).__name__}: {exc}")
+        param_summary = st.session_state.get("v361_param_summary")
+        param_meta = st.session_state.get("v361_param_meta")
+        param_context = st.session_state.get("v361_param_context")
+        if isinstance(param_summary, pd.DataFrame) and not param_summary.empty:
+            st.markdown("### 参数排名（探索性）")
+            st.dataframe(param_summary, hide_index=True, use_container_width=True)
+            st.markdown("**当前排名第一的参数组合**")
+            st.json(param_meta.get("best_config", {}))
+            st.download_button("下载参数搜索排名 CSV", param_summary.to_csv(index=False).encode("utf-8-sig"), "lotto645_v361_parameter_search.csv", "text/csv")
+            param_detail = st.session_state.get("v361_param_detail")
+            if isinstance(param_detail, pd.DataFrame) and not param_detail.empty:
+                st.download_button("下载逐期参数实验明细 CSV", param_detail.to_csv(index=False).encode("utf-8-sig"), "lotto645_v361_parameter_search_detail.csv", "text/csv")
+            st.download_button("下载参数实验元数据 JSON", json.dumps(param_meta, ensure_ascii=False, indent=2), "lotto645_v361_parameter_metadata.json", "application/json")
+            st.info(f"保留区间：第{param_meta['reserved_holdout_start_draw']}期至第{param_meta['reserved_holdout_end_draw']}期，共{param_meta['reserved_holdout_draws']}期。参数搜索没有读取该区间。")
+            st.warning("查看保留区间验证结果后，该区间即被消耗；不要再反复调整参数并把同一批数据当作未触碰测试集。")
+            project_experiments = st.session_state.get("v36_project_state", {}).get("experiments", [])
+            same_holdout_was_consumed = any(
+                item.get("holdout_evaluated")
+                and item.get("data_fingerprint") == param_meta.get("data_fingerprint")
+                and item.get("reserved_holdout_start_draw") == param_meta.get("reserved_holdout_start_draw")
+                and item.get("reserved_holdout_end_draw") == param_meta.get("reserved_holdout_end_draw")
+                for item in project_experiments
+            )
+            holdout_already_used = bool(param_meta.get("holdout_evaluated", False) or same_holdout_was_consumed)
+            if holdout_already_used:
+                st.success("这组参数的保留区间已经评估过；为避免反复查看同一测试段后继续调参，按钮已锁定。")
+            elif st.button("用排名第一的固定参数进行保留区间验证", type="secondary", use_container_width=True, key="v361_evaluate_holdout"):
+                try:
+                    cfg = param_meta["best_config"]
+                    bar = st.progress(0, text="保留区间验证中…")
+                    def holdout_progress(done: int, total: int):
+                        bar.progress(min(1.0, done / max(total, 1)), text=f"保留区间验证：{done:,}/{total:,}")
+                    raw_hold, summary_hold, meta_hold = evaluate_reserved_holdout(
+                        df, param_context["model"], cfg, param_context["min_train"],
+                        param_context["holdout"], tickets_per_draw=param_context["tickets"],
+                        n_seeds=param_context["seeds"], seed=param_context["seed"],
+                        progress_callback=holdout_progress,
+                    )
+                    st.session_state["v361_holdout_raw"] = raw_hold
+                    st.session_state["v361_holdout_summary"] = summary_hold
+                    st.session_state["v361_holdout_meta"] = meta_hold
+                    st.session_state["v361_param_meta"]["holdout_evaluated"] = True
+                    st.session_state["v361_param_meta"]["holdout_consumed"] = True
+                    st.session_state["v36_project_state"] = add_experiment(
+                        st.session_state["v36_project_state"], "固定参数保留区间验证", meta_hold,
+                        summary_hold.to_dict(orient="records"),
+                    )
+                    st.success("固定参数保留区间验证完成。该保留区间已记为已使用。")
+                except Exception as exc:
+                    st.error(f"保留区间验证失败：{type(exc).__name__}: {exc}")
+        hold_sum = st.session_state.get("v361_holdout_summary")
+        hold_raw = st.session_state.get("v361_holdout_raw")
+        hold_meta = st.session_state.get("v361_holdout_meta")
+        if isinstance(hold_sum, pd.DataFrame) and not hold_sum.empty:
+            st.markdown("### 固定参数保留区间结果")
+            st.dataframe(hold_sum, hide_index=True, use_container_width=True)
+            st.download_button("下载保留区间逐注明细", hold_raw.to_csv(index=False).encode("utf-8-sig"), "lotto645_v361_holdout_detail.csv", "text/csv")
+            st.download_button("下载保留区间元数据", json.dumps(hold_meta, ensure_ascii=False, indent=2), "lotto645_v361_holdout_metadata.json", "application/json")
+
+with page_ensemble:
+    st.subheader("多模型集成实验")
+    st.write("新策略融合近期频率、贝叶斯平滑和指数时间衰减。这里的权重是号码抽样权重，不是开奖概率。")
+    recent_share = st.slider("近期频率权重", 0.05, 0.80, 0.40, 0.05, key="v361_ens_recent")
+    max_bayes = round(0.95 - recent_share, 2)
+    bayes_share = st.slider("贝叶斯平滑权重", 0.05, max(0.05, max_bayes), min(0.35, max_bayes), 0.05, key="v361_ens_bayes")
+    decay_share = round(1.0 - recent_share - bayes_share, 2)
+    st.metric("指数衰减权重（自动补足）", f"{decay_share:.0%}")
+    if decay_share < 0:
+        st.error("权重总和不得超过100%。请调整前两项。")
+    else:
+        st.write({"近期频率": recent_share, "贝叶斯平滑": bayes_share, "指数衰减": decay_share})
+        ens_train = st.selectbox("集成模型最低训练期数", [w for w in [50, 100, 150, 200, 300, 500] if w < len(df)], index=0, key="v361_ens_train")
+        ens_test_max = max(1, min(100, len(df) - ens_train))
+        ens_tests = st.slider("集成模型测试期数", 1, ens_test_max, min(50, ens_test_max), key="v361_ens_tests")
+        ens_seeds = st.selectbox("随机种子组数", [1, 3, 5], index=1, key="v361_ens_seeds")
+        if st.button("评估集成模型与随机基准", type="primary", use_container_width=True, key="v361_eval_ensemble"):
+            try:
+                ens_raw, ens_summary, ens_meta = run_backtest(
+                    df, lookback=ens_train, test_draws=ens_tests, tickets_per_draw=10,
+                    n_seeds=ens_seeds, seed=2026, recent_window=ens_train,
+                    multi_model_weights=(recent_share, bayes_share, decay_share),
+                    strategies=["多模型集成模型", "均匀随机基准"],
+                )
+                st.session_state["v361_ensemble_raw"] = ens_raw
+                st.session_state["v361_ensemble_summary"] = ens_summary
+                st.session_state["v361_ensemble_meta"] = ens_meta
+                st.session_state["v36_project_state"] = add_experiment(
+                    st.session_state["v36_project_state"], "多模型集成实验", ens_meta,
+                    ens_summary.to_dict(orient="records"),
+                )
+                st.success(f"集成实验完成：{len(ens_raw):,}条明细。")
+            except Exception as exc:
+                st.error(f"集成实验失败：{type(exc).__name__}: {exc}")
+        ens_summary_now = st.session_state.get("v361_ensemble_summary")
+        ens_raw_now = st.session_state.get("v361_ensemble_raw")
+        ens_meta_now = st.session_state.get("v361_ensemble_meta")
+        if isinstance(ens_summary_now, pd.DataFrame) and not ens_summary_now.empty:
+            st.dataframe(ens_summary_now, hide_index=True, use_container_width=True)
+            st.download_button("下载集成实验明细", ens_raw_now.to_csv(index=False).encode("utf-8-sig"), "lotto645_v361_ensemble_detail.csv", "text/csv")
+            st.download_button("下载集成实验元数据", json.dumps(ens_meta_now, ensure_ascii=False, indent=2), "lotto645_v361_ensemble_metadata.json", "application/json")
+
+with page_portfolio:
+    st.subheader("10组候选号码组合优化")
+    st.info("此功能是在模型产生的号码抽样权重下，用贪心启发式平衡号码评分、覆盖增量和组间重叠。组合多样性本身不提高单注理论中奖概率。")
+    portfolio_models = [name for name in MODEL_NAMES if name != "均匀随机基准"]
+    p_model = st.selectbox("基础选号模型", portfolio_models, index=portfolio_models.index("多模型集成模型"), key="v361_portfolio_model")
+    p_window = st.selectbox("历史窗口", [50, 100, 200, 300, 500], index=1, key="v361_portfolio_window")
+    p_overlap = st.slider("任意两组最多共享号码数", 0, 5, 4, key="v361_portfolio_overlap")
+    p_pool = st.select_slider("候选池规模", options=[1000, 2000, 5000, 8000, 12000], value=5000, key="v361_portfolio_pool")
+    q_weight = st.slider("模型号码评分权重", 0.10, 0.70, 0.30, 0.05, key="v361_portfolio_q")
+    c_max = round(0.95 - q_weight, 2)
+    c_weight = st.slider("新增号码覆盖权重", 0.10, max(0.10, c_max), min(0.45, c_max), 0.05, key="v361_portfolio_c")
+    o_weight = round(1.0 - q_weight - c_weight, 2)
+    st.metric("组间重叠惩罚权重（自动补足）", f"{o_weight:.0%}")
+    p_seed = st.number_input("组合生成随机种子", min_value=0, max_value=2_000_000_000, value=2026, step=1, key="v361_portfolio_seed")
+    if st.button("优化并生成10组号码", type="primary", use_container_width=True, key="v361_run_portfolio"):
+        try:
+            portfolio, portfolio_report = optimize_portfolio(
+                df, model_name=p_model, count=10, window=p_window, max_overlap=p_overlap,
+                candidate_pool_size=int(p_pool), quality_weight=q_weight,
+                coverage_weight=c_weight, overlap_penalty=o_weight, seed=int(p_seed),
+            )
+            st.session_state["v361_portfolio"] = portfolio
+            st.session_state["v361_portfolio_report"] = portfolio_report
+            st.success("10组组合优化完成。")
+        except Exception as exc:
+            st.error(f"组合优化失败：{type(exc).__name__}: {exc}")
+    portfolio_now = st.session_state.get("v361_portfolio")
+    portfolio_report_now = st.session_state.get("v361_portfolio_report")
+    if isinstance(portfolio_now, pd.DataFrame) and not portfolio_now.empty:
+        st.dataframe(portfolio_now, hide_index=True, use_container_width=True)
+        if isinstance(portfolio_report_now, dict):
+            met = st.columns(4)
+            met[0].metric("不同号码数", f"{portfolio_report_now['不同号码数']}/45")
+            met[1].metric("号码覆盖率", f"{portfolio_report_now['号码覆盖率']:.1%}")
+            met[2].metric("最大组间重号", portfolio_report_now["最大组间重号"])
+            met[3].metric("平均组间重号", f"{portfolio_report_now['平均组间重号']:.2f}")
+            with st.expander("查看组合质量报告"):
+                st.json(portfolio_report_now)
+        st.download_button("下载10组优化号码 CSV", portfolio_now.to_csv(index=False).encode("utf-8-sig"), "lotto645_v361_optimized_10_tickets.csv", "text/csv")
+        st.download_button("下载组合质量报告 JSON", json.dumps(portfolio_report_now, ensure_ascii=False, indent=2), "lotto645_v361_portfolio_report.json", "application/json")
+
 with page_models:
-    st.subheader("模型登记与版本")
-    registry = pd.DataFrame(get_model_registry())
-    st.dataframe(registry, hide_index=True, use_container_width=True)
-    st.info("第一阶段将现有七种策略登记为实验模型或随机对照基准。当前没有任何统计模型被自动标记为已验证优胜模型。")
+    st.subheader("模型管理与实验档案")
+    st.write("实验状态保存在当前 Streamlit 会话中。为避免云端重启后丢失，请定期下载 JSON 档案并在新会话中重新导入。")
+    state_upload = st.file_uploader("导入以前保存的模型档案 JSON", type=["json"], key="v361_state_upload")
+    if state_upload is not None and st.button("导入模型档案", key="v361_import_state"):
+        try:
+            imported_state = import_project_state(state_upload.getvalue().decode("utf-8"))
+            st.session_state["v36_project_state"] = imported_state
+            st.success("模型档案导入成功。")
+        except Exception as exc:
+            st.error(f"模型档案导入失败：{exc}")
+    current_state = st.session_state.get("v36_project_state", new_project_state())
+    model_rows = []
+    for name, record in current_state["models"].items():
+        model_rows.append({"模型": name, "版本": record.get("version"), "状态": record.get("status"), "状态说明": record.get("status_note"), "证据实验": record.get("evidence_experiment_id")})
+    st.markdown("### 当前模型状态")
+    st.dataframe(pd.DataFrame(model_rows), hide_index=True, use_container_width=True)
+    st.markdown("### 手动调整模型状态")
+    editable_models = [name for name in current_state["models"] if name != "均匀随机基准"]
+    status_model = st.selectbox("选择模型", editable_models, key="v361_status_model")
+    new_status = st.selectbox("新状态", MODEL_STATUSES, key="v361_new_status")
+    status_note = st.text_input("调整原因（必填）", key="v361_status_note")
+    holdout_experiments = [x for x in current_state["experiments"] if x.get("holdout_evaluated") and x.get("model_name") == status_model]
+    evidence_id = None
+    if new_status == "验证通过":
+        evidence_options = [x["experiment_id"] for x in holdout_experiments]
+        evidence_id = st.selectbox("关联该模型的保留区间实验", evidence_options, key="v361_evidence_id") if evidence_options else None
+        if not evidence_options:
+            st.caption("尚无该模型的保留区间验证证据，暂时不能标记为验证通过。")
+    if st.button("保存模型状态", key="v361_save_status"):
+        try:
+            st.session_state["v36_project_state"] = change_model_status(
+                current_state, status_model, new_status, status_note, evidence_id,
+            )
+            st.success("模型状态已更新。")
+        except Exception as exc:
+            st.error(f"状态更新失败：{exc}")
+    st.markdown("### 实验历史")
+    experiment_rows = current_state["experiments"]
+    if experiment_rows:
+        exp_view = pd.DataFrame([{
+            "实验编号": x.get("experiment_id"), "类型": x.get("experiment_type"),
+            "模型": x.get("model_name"), "时间": x.get("created_at_utc"),
+            "数据末期": x.get("data_last_draw"), "保留区间验证": x.get("holdout_evaluated"),
+        } for x in experiment_rows])
+        st.dataframe(exp_view, hide_index=True, use_container_width=True)
+    else:
+        st.caption("当前会话尚无实验记录。执行回测、参数搜索或保留区间验证后会自动记录摘要。")
+    st.download_button("下载完整模型与实验档案 JSON", export_project_state(current_state), "lotto645_v361_model_archive.json", "application/json")
 
 with page_data:
     st.subheader("手动数据管理")
