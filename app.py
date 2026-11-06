@@ -4,11 +4,33 @@ from __future__ import annotations
 
 import io
 import json
+import inspect
+import sys
 from pathlib import Path
+
+# LOTTO645_RUNTIME_IMPORT_GUARD_V1
+# Always load this app's own modules before any same-named package/module elsewhere.
+APP_DIR = Path(__file__).resolve().parent
+_APP_ROOT = str(APP_DIR)
+if _APP_ROOT in sys.path:
+    sys.path.remove(_APP_ROOT)
+sys.path.insert(0, _APP_ROOT)
+
+# Streamlit reruns scripts in a long-lived process. Remove cached project modules
+# so every rerun binds the optimizer to the matching engine in this app directory.
+for _module_name in (
+    "backtest_engine", "joint_optimizer", "parameter_optimizer",
+    "portfolio_optimizer", "lotto_core", "model_registry",
+    "model_management", "experiment_export", "data_manager",
+):
+    sys.modules.pop(_module_name, None)
 
 import pandas as pd
 import plotly.express as px
 import streamlit as st
+
+import backtest_engine as _runtime_backtest_engine
+import joint_optimizer as _runtime_joint_optimizer
 
 from backtest_engine import run_backtest, run_multi_window_backtest
 from parameter_optimizer import (
@@ -29,7 +51,24 @@ from lotto_core import (
 )
 from model_registry import ENGINE_VERSION
 
-APP_DIR = Path(__file__).resolve().parent
+_RUNTIME_ENGINE_PATH = str(Path(_runtime_backtest_engine.__file__).resolve())
+_RUNTIME_JOINT_PATH = str(Path(_runtime_joint_optimizer.__file__).resolve())
+_RUNTIME_ENGINE_SIGNATURE = str(inspect.signature(_runtime_backtest_engine._make_weights))
+_RUNTIME_JOINT_SIGNATURE = str(inspect.signature(_runtime_joint_optimizer._make_weights))
+_RUNTIME_SAME_FUNCTION = (
+    _runtime_joint_optimizer._make_weights is _runtime_backtest_engine._make_weights
+)
+_RUNTIME_SIGNATURE_OK = len(inspect.signature(_runtime_backtest_engine._make_weights).parameters) == 11
+_RUNTIME_MODULE_DIAGNOSTICS = {
+    "app.py": str(Path(__file__).resolve()),
+    "APP_DIR": str(APP_DIR),
+    "backtest_engine.__file__": _RUNTIME_ENGINE_PATH,
+    "joint_optimizer.__file__": _RUNTIME_JOINT_PATH,
+    "backtest_engine._make_weights": _RUNTIME_ENGINE_SIGNATURE,
+    "joint_optimizer._make_weights": _RUNTIME_JOINT_SIGNATURE,
+    "joint_optimizer_uses_same_function_object": _RUNTIME_SAME_FUNCTION,
+    "11_parameter_contract_ok": _RUNTIME_SIGNATURE_OK,
+}
 DATA_DIR = APP_DIR / "data"
 HISTORY_PATH = DATA_DIR / "lotto645.csv"
 
@@ -116,6 +155,9 @@ with page_overview:
     overview_cols[1].metric("每次默认候选组数", 10)
     overview_cols[2].metric("外部数据连接", "未启用")
     st.info("V3.7 全模型联合参数搜索、嵌套滚动验证、独立保留测试与 Pareto 多目标优化。模型表现只用于统计研究，不代表下一期开奖概率。")
+
+    with st.expander("运行环境诊断（模块路径与函数签名）"):
+        st.json(_RUNTIME_MODULE_DIAGNOSTICS)
 
 with page_pick:
     st.subheader("生成10组候选号码")
@@ -484,6 +526,8 @@ with page_joint:
                 )
             except Exception as exc:
                 st.error(f"全模型联合优化失败：{type(exc).__name__}: {exc}")
+                with st.expander("运行时模块诊断"):
+                    st.json(_RUNTIME_MODULE_DIAGNOSTICS)
 
     _joint_result = st.session_state.get("v37_joint_result")
     if isinstance(_joint_result, dict) and _joint_result.get("metadata", {}).get("data_fingerprint_sha256") == _joint_fingerprint:
