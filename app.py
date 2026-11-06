@@ -173,10 +173,25 @@ with tabs[2]:
         seeds = st.selectbox("随机种子组数", [1, 3, 5], index=1)
     tickets = st.selectbox("每期每模型模拟注数", [1, 3, 5, 10], index=2)
     if st.button("运行样本外回测", type="primary", use_container_width=True):
-        with st.spinner("回测中。每个历史测试期仅使用此前数据…"):
-            raw, summary = run_backtest(df, lookback, test_count, tickets, seeds)
-        st.session_state["v3_bt_raw"] = raw
-        st.session_state["v3_bt_summary"] = summary
+        progress = st.progress(0, text="正在准备历史数据…")
+        progress_note = st.empty()
+        def update_backtest_progress(completed, total, draw_no):
+            ratio = completed / max(total, 1)
+            progress.progress(ratio, text=f"回测进度：{completed}/{total} 期（{ratio:.0%}）")
+            progress_note.caption(f"正在评估第 {draw_no} 期；每次预测仅使用此前历史数据。")
+        try:
+            raw, summary = run_backtest(
+                df, lookback, test_count, tickets, seeds,
+                progress_callback=update_backtest_progress,
+            )
+            st.session_state["v3_bt_raw"] = raw
+            st.session_state["v3_bt_summary"] = summary
+            if not summary.empty:
+                st.success(f"回测完成：{test_count} 期、{len(summary)} 种策略、{len(raw):,} 注模拟号码。")
+            else:
+                st.warning(f"可用历史数据不足。当前 {len(df)} 期，训练窗口为 {lookback} 期。")
+        except Exception as exc:
+            st.error(f"回测失败：{type(exc).__name__}: {exc}")
     summary = st.session_state.get("v3_bt_summary")
     raw = st.session_state.get("v3_bt_raw")
     if summary is not None and not summary.empty:

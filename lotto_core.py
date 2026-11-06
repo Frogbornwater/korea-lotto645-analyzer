@@ -416,38 +416,120 @@ def theoretical_random_metrics() -> dict[str, float]:
     return {"mean_hits_per_ticket": 0.8, "p3plus": p3plus, "jackpot_probability": 1 / total}
 
 
+def _backtest_weights(numbers: np.ndarray, model: str, window: int, half_life: float = 40.0) -> np.ndarray:
+    """Fast equivalent of model_weights for an already validated 2-D number array."""
+    if model in ("均匀随机基准", "历史结构约束模型"):
+        return np.ones(45, dtype=float)
+    recent = numbers[-min(max(1, int(window)), len(numbers)):]
+    recent_counts = np.bincount(recent.ravel(), minlength=46)[1:46].astype(float)
+    long_counts = np.bincount(numbers.ravel(), minlength=46)[1:46].astype(float)
+    n_recent, n_long = len(recent), len(numbers)
+    prior_rate = 6 / 45
+    if model == "近期频率模型":
+        return np.maximum((recent_counts + 8.0 * prior_rate) / max(n_recent + 8.0, 1.0), 1e-8)
+    if model == "长期频率模型":
+        return np.maximum((long_counts + 40.0 * prior_rate) / max(n_long + 40.0, 1.0), 1e-8)
+    if model == "指数时间衰减模型":
+        decayed = np.zeros(45, dtype=float)
+        for age, row in enumerate(recent[::-1]):
+            decayed[row - 1] += math.exp(-age / max(float(half_life), 1.0))
+        return np.maximum(decayed + max(40.0 * prior_rate, 1.0), 1e-8)
+    if model == "贝叶斯平滑模型":
+        return np.maximum((recent_counts + 80.0 * prior_rate) / max(n_recent + 80.0, 1.0), 1e-8)
+    if model == "综合评分模型":
+        short = numbers[-min(50, len(numbers)):]
+        mid = numbers[-min(200, len(numbers)):]
+        short_counts = np.bincount(short.ravel(), minlength=46)[1:46].astype(float)
+        mid_counts = np.bincount(mid.ravel(), minlength=46)[1:46].astype(float)
+        short_rate = (short_counts + 20.0 * prior_rate) / max(len(short) + 20.0, 1.0)
+        mid_rate = (mid_counts + 40.0 * prior_rate) / max(len(mid) + 40.0, 1.0)
+        long_rate = (long_counts + 80.0 * prior_rate) / max(n_long + 80.0, 1.0)
+        return np.maximum(0.40 * short_rate + 0.35 * mid_rate + 0.25 * long_rate, 1e-8)
+    raise ValueError(f"未知选号模型：{model}")
+
+
+def _backtest_generate_tickets(
+    rng: np.random.Generator, model: str, weights: np.ndarray, count: int,
+    structure_sum_bounds: tuple[float, float] | None = None,
+) -> list[list[int]]:
+    """Generate distinct backtest tickets without repeated DataFrame validation."""
+    probs = np.maximum(np.asarray(weights, dtype=float), 1e-12)
+    probs /= probs.sum()
+    tickets: list[list[int]] = []
+    attempts = 0
+    max_attempts = max(8000, int(count) * 1000)
+    while len(tickets) < count and attempts < max_attempts:
+        attempts += 1
+        if model == "均匀随机基准" or model == "历史结构约束模型":
+            cand = sorted(int(x) for x in rng.choice(np.arange(1, 46), size=6, replace=False))
+            if model == "历史结构约束模型":
+                total = sum(cand)
+                odd = sum(n % 2 for n in cand)
+                low = sum(n <= 15 for n in cand)
+                mid = sum(16 <= n <= 30 for n in cand)
+                high = sum(n >= 31 for n in cand)
+                if structure_sum_bounds is not None:
+                    lo, hi = structure_sum_bounds
+                    if not (lo <= total <= hi and 1 <= odd <= 5 and low >= 1 and mid >= 1 and high >= 1):
+                        continue
+        else:
+            cand = sorted(int(x) for x in rng.choice(np.arange(1, 46), size=6, replace=False, p=probs))
+        if cand not in tickets:
+            tickets.append(cand)
+    if len(tickets) < count:
+        raise RuntimeError(f"回测中无法为{model}生成足够的不同组合；已生成{len(tickets)}/{count}注。")
+    return tickets
+
+
 def run_backtest(
     df: pd.DataFrame, lookback: int = 200, test_draws: int = 100,
     tickets_per_draw: int = 5, n_seeds: int = 3, seed: int = 2026,
+    progress_callback=None,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Walk-forward backtest. Every test prediction uses earlier draws only."""
+    """Walk-forward backtest; optimized to validate once and reuse per-draw model weights.
+
+    Every test prediction uses earlier draws only. progress_callback, when supplied,
+    receives (completed_draws, total_draws, current_draw_no).
+    """
     clean = validate_frame(df)
     if len(clean) <= lookback + 5:
         return pd.DataFrame(), pd.DataFrame()
-    all_nums = get_numbers(clean)
+    all_nums = clean[NUMBER_COLS].to_numpy(dtype=int)
+    draw_numbers = clean["draw_no"].to_numpy(dtype=int)
     start = max(lookback, len(clean) - min(test_draws, len(clean) - lookback))
     strategies = ["均匀随机基准", "近期频率模型", "长期频率模型", "指数时间衰减模型", "贝叶斯平滑模型", "综合评分模型", "历史结构约束模型"]
+    total_draws = len(clean) - start
     rows: list[dict[str, Any]] = []
-    for i in range(start, len(clean)):
-        train = clean.iloc[max(0, i - lookback):i].copy()
-        actual = set(all_nums[i])
-        draw_no = int(clean.iloc[i]["draw_no"])
+    for completed, i in enumerate(range(start, len(clean),), start=1):
+        # Slice only prior draws. No current/future result enters model features.
+        train_nums = all_nums[max(0, i - lookback):i]
+        actual = set(int(x) for x in all_nums[i])
+        draw_no = int(draw_numbers[i])
+        sample_for_structure = train_nums[-min(max(1, min(lookback, 500)), len(train_nums)):]
+        sums = sample_for_structure.sum(axis=1)
+        structure_bounds = tuple(float(x) for x in np.quantile(sums, [0.02, 0.98])) if len(sums) else None
+        weights_by_strategy = {
+            strategy: _backtest_weights(train_nums, strategy, min(lookback, 500))
+            for strategy in strategies
+        }
         for seed_idx in range(n_seeds):
             for strategy_idx, strategy in enumerate(strategies):
                 local_seed = seed + i * 100_003 + seed_idx * 10_007 + strategy_idx * 101
-                tickets, _ = generate_candidates(
-                    train, count=tickets_per_draw, model=strategy,
-                    window=min(lookback, 500), max_overlap=5, seed=local_seed,
+                rng_local = np.random.default_rng(local_seed)
+                tickets = _backtest_generate_tickets(
+                    rng_local, strategy, weights_by_strategy[strategy], tickets_per_draw,
+                    structure_bounds,
                 )
-                for ticket_idx, ticket_row in tickets.iterrows():
-                    ticket = ticket_row["号码列表"]
+                for ticket_idx, ticket in enumerate(tickets, start=1):
                     hits = len(set(ticket) & actual)
                     rows.append({
                         "期数": draw_no, "随机种子组": seed_idx + 1, "策略": strategy,
-                        "注序": int(ticket_idx) + 1, "命中数": hits,
+                        "注序": ticket_idx, "命中数": hits,
                         "命中3个以上": int(hits >= 3), "命中4个以上": int(hits >= 4),
                         "命中5个以上": int(hits >= 5), "命中6个": int(hits == 6),
                     })
+        if progress_callback is not None:
+            progress_callback(completed, total_draws, draw_no)
     raw = pd.DataFrame(rows)
     if raw.empty:
         return raw, pd.DataFrame()
