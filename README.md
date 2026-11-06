@@ -1,68 +1,84 @@
-# 韩国 Lotto 6/45 V3.1：数据同步与模型逻辑修正版
+# Lotto 6/45 V3.6 第一阶段（离线手动数据版）
 
-V3.1 是对原 V3 仓库审查后的修正版。它改进官方接口兼容、失败状态可见性、重复数据处理、候选生成和回测覆盖范围。系统只对历史样本作统计研究，不声称能预测随机开奖或提高单注中奖概率。
+## 本阶段完成内容
 
-## 文件结构
+- 将滚动回测独立到 `backtest_engine.py`。
+- 增加 `model_registry.py`，统一登记七种策略和模型版本。
+- 增加 `data_manager.py`，只读取用户手动上传的 CSV / XLSX / XLS，或仓库中手动维护的 `data/lotto645.csv`。
+- 回测明细保存每注六个号码、模型版本、训练截止期号、训练窗口、随机种子组和实验参数。
+- 增加快速、标准、自定义和多窗口回测模式。
+- 按开奖期进行配对 Bootstrap；多个随机种子先在同一期内汇总，避免把同一期的注数当成独立开奖样本。
+- 修正长期频率模型：现在确实使用目标测试期之前的全部历史；近期频率则使用单独的近期窗口。
+- 候选选号与回测使用一致的默认模型权重定义。
+- 所有数据都由用户手动导入；没有任何联网数据读取代码。
 
-```text
-app.py
-lotto_core.py
-sync_data.py
-requirements.txt
-README.md
-.github/workflows/refresh-data.yml
-tests/test_lotto_core.py
-data/                 # 首次成功同步后生成
+## 严格的数据连接规则
+
+本项目不连接韩国 Lotto 官方网站，不调用该网站 API，不进行自动爬取，也不从外部开奖服务同步历史数据。
+
+建议在 GitHub 仓库中：
+
+1. 删除或禁用 `.github/workflows/` 中任何会执行旧 `sync_data.py` 的工作流，尤其是带有定时触发的同步工作流。
+2. 用本包的 `sync_data.py` 安全停用版本替换旧文件，作为额外保护。该文件只会打印“自动同步已停用”，不会发起网络请求。
+3. 不再需要时，可删除旧 `sync_data.py`。
+4. 保留现有 `data/lotto645.csv`，不要因为升级而删除历史数据。
+
+## GitHub 部署步骤（无需本地安装 Python）
+
+在仓库根目录上传并替换：
+
+- `app.py`
+- `lotto_core.py`
+- `requirements.txt`
+
+新增：
+
+- `backtest_engine.py`
+- `model_registry.py`
+- `data_manager.py`
+- `sync_data.py`（安全停用版本）
+- `tests/test_v36.py`
+
+可选保留：
+
+- `baseline/`：V3.5 第二轮回测汇总及限制说明，仅供项目留档，不参与应用计算。
+
+上传前先按上面的规则停用旧 GitHub Actions 同步工作流。提交后等待 Streamlit Cloud 自动部署。
+
+## 手动历史数据格式
+
+应用支持 CSV、XLSX、XLS。推荐字段：
+
+```csv
+draw_no,date,n1,n2,n3,n4,n5,n6,bonus
 ```
 
-## 在 GitHub 网页更新（Mac 不需要安装 Python）
+可识别部分常见韩文和中文列名，例如 `회차`、`추첨일`、`번호1` 至 `번호6`、`보너스번호`、`号码1` 至 `号码6`、`奖金号码`。
 
-1. 将本 ZIP 解压。
-2. 在仓库根目录上传并替换 `app.py`、`lotto_core.py`、`sync_data.py`、`requirements.txt`、`README.md`。
-3. 创建或替换 `.github/workflows/refresh-data.yml`。
-4. 新增 `tests/test_lotto_core.py`（在仓库根目录创建 `tests` 文件夹）。
-5. 确认仓库 Settings → Actions → General → Workflow permissions 为 `Read and write permissions`。
-6. 在 Actions 中运行 `Refresh Lotto 6/45 data`。
-7. 同步成功后，仓库会生成 `data/lotto645.csv` 和 `data/sync_status.json`，Streamlit Cloud 会因新提交重新部署。
+上传到 Streamlit 页面左侧的文件只在当前应用会话中使用。需要长期作为部署默认数据时，请先手动整理好 CSV，再由你亲自上传到 GitHub 的 `data/lotto645.csv`。应用不会自行更新该文件。
 
-## V3.1 修正点
+## 回测定义
 
-- 官方开奖查询尝试新版 `selectPstLt645InfoNew.do`，并回退到同站点 `selectPstLt645Info.do`。
-- 解析器递归识别官方 JSON 嵌套层级，不再只依赖固定的一种 JSON 外壳。
-- 官方响应重复期次如存在冲突，停止同步，不再静默覆盖。
-- CSV 使用临时文件写入后原子替换，完整校验通过后才覆盖旧数据。
-- GitHub Actions 即使同步步骤失败，也会提交 `sync_status.json`，使失败原因能在应用页面读取；历史 CSV 不会因失败而覆盖。
-- 候选组数与重号限制冲突时，逐步放宽重号上限，但继续使用所选模型；界面显示请求上限、实际允许上限和实际最大重号。
-- “模型相对得分”改为基于当前所选模型的号码权重计算；随机和结构约束模型显示中性分数，不再错误使用五模型平均分。
-- 将“历史结构约束模型”加入滚动样本外回测。
-- 新增 8 项可复现单元测试。
+- 最低训练窗口决定最早从哪一期开始测试。
+- 每一个测试期只能使用该期之前的历史开奖记录。
+- 回测要求手动文件覆盖范围内部期号连续；文件可以从较晚期号开始，但不能在覆盖区间内有缺期。
+- 近期频率模型使用指定近期窗口。
+- 长期频率、贝叶斯平滑和指数时间衰减模型使用测试期之前的全部历史。
+- 历史结构约束模型从此前历史的宽松分布筛选候选号码。
+- 均匀随机基准始终保留。
+- Bootstrap 以开奖期为推断单位；同一期多个随机种子先汇总，再计算模型与随机基准的配对差。
 
-## 官方数据来源说明
+配对检验使用以开奖期为单位的符号翻转检验；Holm 校正分别在平均命中差、单注3+率差和整批3+率差三个指标家族内执行。多窗口比较中，各窗口分别进行校正，但跨窗口挑选最佳结果仍属于探索性分析，不能直接作为确认性证据。
 
-数据仅从 동행복권 官方网站页面使用的 JSON 查询路径获取：
+V3.6 第一阶段尚未包括自动参数优化和高级组合优化；它们属于下一阶段。历史表现领先不代表存在可持续预测优势。公平且独立开奖时，每一组固定六号码的理论概率相同。
 
-- 官方结果页：<https://www.dhlottery.co.kr/lt645/result>
-- 最新页面数据：`https://www.dhlottery.co.kr/selectMainInfo.do`
-- 历史期次查询首选：`https://www.dhlottery.co.kr/lt645/selectPstLt645InfoNew.do`
-- 备用官方历史路径：`https://www.dhlottery.co.kr/lt645/selectPstLt645Info.do`
-
-这些是官网前端使用的查询路径，并不是具有长期稳定性保证的公开 API。网站维护、限流或反自动化限制仍可能导致同步失败。失败时会保留此前有效 CSV，并更新失败状态。
-
-**当前这个 ZIP 不含 `data/lotto645.csv`**：历史记录需要你在 GitHub Actions 中首次运行官方同步后由程序生成。没有 CSV 时，Streamlit 页面会明确提示先同步，不会生成伪造的历史分析结果。
-
-## 模型与概率边界
-
-- 近期频率、长期频率、指数时间衰减、贝叶斯平滑、综合评分：按历史频率为号码设置相对抽样权重。
-- 历史结构约束：根据历史和值宽分位和宽松奇偶/区间约束筛选组合。
-- 均匀随机基准：对照组。
-- 回测采用 walk-forward，每个测试期只使用此前开奖记录；随机种子、模型、测试窗口应在比较时保持一致。
-- 模型相对得分不是中奖概率。公平独立开奖时，任何一组固定的六号码头奖概率均为 `1 / C(45,6) = 1 / 8,145,060`。
-
-## 本地测试（可选）
+## 本地自动测试（可选）
 
 ```bash
-pip install -r requirements.txt
+python -m pip install -r requirements.txt
 python -m unittest discover -s tests -v
 ```
 
-Streamlit Cloud 会自动安装 `requirements.txt`；使用在线应用的 Mac 不需要安装 Python。
+本开发环境中执行的自动测试：17 项通过。Python 语法编译检查通过。Streamlit 页面未在本开发环境启动（当前环境没有安装 Streamlit），部署后仍需在用户自己的 Streamlit Cloud 实例进行界面和云端验收。
+
+GitHub 逐步上传清单见 [`GITHUB_UPLOAD_CHECKLIST_CN.md`](GITHUB_UPLOAD_CHECKLIST_CN.md)。
