@@ -75,7 +75,7 @@ class ValidationTests(unittest.TestCase):
 class RegistryTests(unittest.TestCase):
     def test_registry_matches_core_models(self):
         self.assertEqual([x["name"] for x in get_model_registry()], MODEL_NAMES)
-        self.assertEqual(ENGINE_VERSION, "3.6.1-full")
+        self.assertEqual(ENGINE_VERSION, "3.7.0-joint")
 
 
 class BacktestTests(unittest.TestCase):
@@ -181,7 +181,7 @@ class BacktestTests(unittest.TestCase):
 
 class OfflinePolicyTests(unittest.TestCase):
     def test_application_python_sources_have_no_network_integration(self):
-        targets = ["app.py", "lotto_core.py", "backtest_engine.py", "model_registry.py", "data_manager.py", "sync_data.py", "parameter_optimizer.py", "portfolio_optimizer.py", "model_management.py"]
+        targets = ["app.py", "lotto_core.py", "backtest_engine.py", "model_registry.py", "data_manager.py", "sync_data.py", "parameter_optimizer.py", "portfolio_optimizer.py", "model_management.py", "experiment_export.py"]
         forbidden = ["http://", "https://", "dhlottery", "requests.get", "requests.post", "urllib.request", "httpx"]
         for filename in targets:
             source = (ROOT / filename).read_text(encoding="utf-8").lower()

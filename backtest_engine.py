@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Independent, deterministic walk-forward engine for Lotto 6/45 V3.6.
+"""Independent, deterministic walk-forward engine for Lotto 6/45 V3.7.
 
 All training features for a target draw are computed only from rows before that
 row. This module is deliberately offline and accepts an already supplied frame.
@@ -35,6 +35,10 @@ def _make_weights(
     bayes_prior: float,
     ensemble_weights: tuple[float, float, float],
     multi_model_weights: tuple[float, float, float] = (0.40, 0.35, 0.25),
+    recent_prior: float = 8.0,
+    long_prior: float = 40.0,
+    ensemble_short_window: int = 50,
+    ensemble_mid_window: int = 200,
 ) -> np.ndarray:
     """Build strategy weights using strictly pre-target historical rows."""
     if len(all_past) == 0:
@@ -45,10 +49,10 @@ def _make_weights(
 
     if strategy == "近期频率模型":
         recent = all_past[-min(max(1, recent_window), len(all_past)):]
-        return np.maximum(_smoothed_frequency(recent, 8.0), 1e-12)
+        return np.maximum(_smoothed_frequency(recent, recent_prior), 1e-12)
 
     if strategy == "长期频率模型":
-        return np.maximum(_smoothed_frequency(all_past, 40.0), 1e-12)
+        return np.maximum(_smoothed_frequency(all_past, long_prior), 1e-12)
 
     if strategy == "贝叶斯平滑模型":
         return np.maximum(_smoothed_frequency(all_past, bayes_prior), 1e-12)
@@ -64,8 +68,8 @@ def _make_weights(
         return np.maximum(weighted + 40.0 * PRIOR_RATE, 1e-12)
 
     if strategy == "综合评分模型":
-        short = all_past[-min(50, len(all_past)):]
-        medium = all_past[-min(200, len(all_past)):]
+        short = all_past[-min(max(1, int(ensemble_short_window)), len(all_past)):]
+        medium = all_past[-min(max(1, int(ensemble_mid_window)), len(all_past)):]
         long = all_past
         a, b, c = ensemble_weights
         if not math.isclose(a + b + c, 1.0, rel_tol=0, abs_tol=1e-8):
@@ -79,7 +83,7 @@ def _make_weights(
 
     if strategy == "多模型集成模型":
         recent = all_past[-min(max(1, recent_window), len(all_past)):]
-        recent_weights = _smoothed_frequency(recent, 8.0)
+        recent_weights = _smoothed_frequency(recent, recent_prior)
         bayes_weights = _smoothed_frequency(all_past, bayes_prior)
         hl = max(float(half_life), 1.0)
         ages = np.arange(len(all_past) - 1, -1, -1, dtype=float)
@@ -96,9 +100,13 @@ def _make_weights(
     raise ValueError(f"未注册的回测策略：{strategy}")
 
 
-def _structure_bounds(train: np.ndarray) -> tuple[float, float]:
+def _structure_bounds(
+    train: np.ndarray, lower_quantile: float = 0.02, upper_quantile: float = 0.98
+) -> tuple[float, float]:
+    if not 0.0 < lower_quantile < upper_quantile < 1.0:
+        raise ValueError("结构和值分位数必须满足 0 < lower < upper < 1。")
     sums = train.sum(axis=1)
-    return tuple(float(x) for x in np.quantile(sums, [0.02, 0.98]))
+    return tuple(float(x) for x in np.quantile(sums, [lower_quantile, upper_quantile]))
 
 
 def _passes_structure(ticket: tuple[int, ...], sum_bounds: tuple[float, float]) -> bool:
@@ -216,6 +224,12 @@ def run_backtest(
     bayes_prior: float = 80.0,
     ensemble_weights: tuple[float, float, float] = (0.40, 0.35, 0.25),
     multi_model_weights: tuple[float, float, float] = (0.40, 0.35, 0.25),
+    recent_prior: float = 8.0,
+    long_prior: float = 40.0,
+    ensemble_short_window: int = 50,
+    ensemble_mid_window: int = 200,
+    structure_lower_quantile: float = 0.02,
+    structure_upper_quantile: float = 0.98,
     bootstrap_reps: int = 5000,
     signflip_reps: int = 10000,
     data_source_label: str = "用户手动提供的历史数据",
@@ -285,7 +299,9 @@ def run_backtest(
         train_start_draw = int(draw_numbers[0])
         train_end_draw = int(draw_numbers[target_idx - 1])
         structure_train = all_past[-min(lookback, len(all_past)):]
-        structure_bounds = _structure_bounds(structure_train)
+        structure_bounds = _structure_bounds(
+            structure_train, structure_lower_quantile, structure_upper_quantile
+        )
 
         for seed_idx in range(n_seeds):
             for strategy_idx, strategy in enumerate(selected):
@@ -297,7 +313,8 @@ def run_backtest(
                 )
                 rng = np.random.default_rng(strategy_seed)
                 weights = _make_weights(
-                    all_past, strategy, recent_window, half_life, bayes_prior, ensemble_weights, multi_model_weights
+                    all_past, strategy, recent_window, half_life, bayes_prior, ensemble_weights,
+                    multi_model_weights, recent_prior, long_prior, ensemble_short_window, ensemble_mid_window,
                 )
                 bounds = structure_bounds if strategy == "历史结构约束模型" else None
                 tickets = _draw_tickets(rng, weights, tickets_per_draw, bounds)
@@ -451,6 +468,12 @@ def run_backtest(
         "bayes_prior": float(bayes_prior),
         "ensemble_weights": list(ensemble_weights),
         "multi_model_weights": list(multi_model_weights),
+        "recent_prior": float(recent_prior),
+        "long_prior": float(long_prior),
+        "ensemble_short_window": int(ensemble_short_window),
+        "ensemble_mid_window": int(ensemble_mid_window),
+        "structure_lower_quantile": float(structure_lower_quantile),
+        "structure_upper_quantile": float(structure_upper_quantile),
         "bootstrap_reps": bootstrap_reps,
         "signflip_reps": signflip_reps,
         "multiple_testing_correction": "Holm；对各非随机模型分别按平均命中差、单注3+率差、整批3+率差三项进行家族内校正。",

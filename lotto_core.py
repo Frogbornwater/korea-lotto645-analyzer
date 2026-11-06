@@ -206,7 +206,7 @@ def model_weights(
     ensemble_weights: tuple[float, float, float] = (0.40, 0.35, 0.25),
     multi_model_weights: tuple[float, float, float] = (0.40, 0.35, 0.25),
 ) -> np.ndarray:
-    """Return relative number weights aligned with V3.6 backtest definitions.
+    """Return relative number weights aligned with V3.7 backtest definitions.
 
     Weights are descriptive sampling weights, never calibrated draw probabilities.
     Long-term, Bayesian and time-decay strategies use all supplied prior history.
@@ -383,7 +383,7 @@ def theoretical_random_metrics() -> dict[str, float]:
 
 
 def run_backtest(*args, **kwargs):
-    """Compatibility wrapper; the V3.6 backtest implementation lives in backtest_engine.py."""
+    """Compatibility wrapper; the V3.7 backtest implementation lives in backtest_engine.py."""
     from backtest_engine import run_backtest as _run_backtest
     raw, summary, _metadata = _run_backtest(*args, **kwargs)
     return raw, summary

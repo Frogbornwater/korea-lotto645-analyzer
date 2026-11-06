@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Lotto 6/45 V3.6 Phase 1 - offline/manual-data analysis application."""
+"""Lotto 6/45 V3.7 joint AutoML console - offline/manual-data application."""
 from __future__ import annotations
 
 import io
@@ -15,10 +15,12 @@ from parameter_optimizer import (
     SEARCHABLE_MODELS, evaluate_reserved_holdout, run_parameter_search,
 )
 from portfolio_optimizer import optimize_portfolio
+from joint_optimizer import run_joint_optimization
 from model_management import (
     MODEL_STATUSES, add_experiment, change_model_status, export_project_state,
     import_project_state, new_project_state,
 )
+from experiment_export import build_research_bundle
 from data_manager import load_repository_history, read_manual_upload
 from lotto_core import (
     COLUMNS, MODEL_NAMES, compare_ticket_to_history, draw_features, frequency_table,
@@ -31,8 +33,8 @@ APP_DIR = Path(__file__).resolve().parent
 DATA_DIR = APP_DIR / "data"
 HISTORY_PATH = DATA_DIR / "lotto645.csv"
 
-st.set_page_config(page_title="Lotto 6/45 V3.6.1 · 离线分析实验室", page_icon="🎯", layout="wide")
-st.title("🎯 韩国 Lotto 6/45 · V3.6.1 综合分析实验室")
+st.set_page_config(page_title="Lotto 6/45 V3.7 · 全模型联合优化实验室", page_icon="🎯", layout="wide")
+st.title("🎯 韩国 Lotto 6/45 · V3.7 全模型联合优化实验室")
 st.caption("手动历史数据导入｜多模型分析｜可复现滚动回测｜研究与娱乐用途")
 
 
@@ -92,8 +94,8 @@ st.caption(f"数据来源：{data_source}｜引擎版本：{ENGINE_VERSION}｜�
 if "v36_project_state" not in st.session_state:
     st.session_state["v36_project_state"] = new_project_state()
 
-page_overview, page_pick, page_stats, page_backtest, page_optimizer, page_ensemble, page_portfolio, page_models, page_data, page_review = st.tabs([
-    "系统总览", "智能选号", "历史统计", "回测中心", "参数实验室", "模型集成", "组合优化", "模型管理", "数据管理", "选号复盘"
+page_overview, page_pick, page_stats, page_backtest, page_optimizer, page_joint, page_ensemble, page_portfolio, page_models, page_data, page_review = st.tabs([
+    "系统总览", "智能选号", "历史统计", "回测中心", "单模型参数实验", "全模型联合优化", "模型集成", "组合优化", "模型管理", "数据管理", "选号复盘"
 ])
 
 with page_overview:
@@ -113,7 +115,7 @@ with page_overview:
     overview_cols[0].metric("已注册策略", len(MODEL_NAMES))
     overview_cols[1].metric("每次默认候选组数", 10)
     overview_cols[2].metric("外部数据连接", "未启用")
-    st.info("V3.6.1 集成参数搜索、多模型集成、10组组合多样性优化和可导出的模型实验档案。模型表现只用于统计研究，不代表下一期开奖概率。")
+    st.info("V3.7 全模型联合参数搜索、嵌套滚动验证、独立保留测试与 Pareto 多目标优化。模型表现只用于统计研究，不代表下一期开奖概率。")
 
 with page_pick:
     st.subheader("生成10组候选号码")
@@ -398,6 +400,182 @@ with page_optimizer:
             st.download_button("下载保留区间逐注明细", hold_raw.to_csv(index=False).encode("utf-8-sig"), "lotto645_v361_holdout_detail.csv", "text/csv")
             st.download_button("下载保留区间元数据", json.dumps(hold_meta, ensure_ascii=False, indent=2), "lotto645_v361_holdout_metadata.json", "application/json")
 
+with page_joint:
+    st.subheader("V3.7 全模型联合优化控制台")
+    st.markdown(
+        "一次运行覆盖全部8种策略：7种可调模型共搜索500组唯一参数配置；"
+        "均匀随机基准作为所有内层、外层和最终保留测试的共同配对对照，不参与参数调优。"
+    )
+    st.warning(
+        "本实验会消耗最新独立保留区间。最终配置在开发数据上冻结后，保留集只评估一次；"
+        "查看结果后不得继续用同一保留集反复调参。公平独立开奖下，模型历史表现不改变固定号码组合的理论概率。"
+    )
+    import hashlib as _hashlib
+    _joint_fingerprint = _hashlib.sha256(df.to_csv(index=False).encode("utf-8")).hexdigest()
+    _project_state = st.session_state.get("v36_project_state", new_project_state())
+    _already_consumed = any(
+        item.get("experiment_type") == "V3.7全模型联合优化"
+        and item.get("data_fingerprint") == _joint_fingerprint
+        for item in _project_state.get("experiments", [])
+    )
+    _existing_result = st.session_state.get("v37_joint_result")
+    _same_session_result = (
+        isinstance(_existing_result, dict)
+        and _existing_result.get("metadata", {}).get("data_fingerprint_sha256") == _joint_fingerprint
+    )
+
+    cfg_cols = st.columns(4)
+    cfg_cols[0].metric("模型覆盖", "8种（含随机基准）")
+    cfg_cols[1].metric("唯一参数预算", "500组")
+    cfg_cols[2].metric("每期每模型", "10注")
+    cfg_cols[3].metric("随机种子", "3组")
+    st.markdown("### 验证结构")
+    st.write({
+        "优化目标": "balanced（六项目标等权百分位排名）",
+        "最低训练历史": "300期",
+        "外层滚动验证": "2折 × 每折30期",
+        "内层滚动验证": "每个外层训练前缀2折 × 每折5期",
+        "独立保留测试集": "最新100期",
+        "参数预算口径": "500组唯一参数配置在各折间复用；不是每折额外生成500组。",
+    })
+    st.caption(
+        "Pareto目标：相对随机的平均命中差、单注3+率差、整批3+差、号码覆盖差、组间重号减少，以及内层折间稳定性。"
+    )
+    _min_required = 300 + 2 * 5 + 2 * 30 + 100
+    if len(df) < _min_required:
+        st.error(f"当前只有{len(df)}期。按默认嵌套结构至少需要{_min_required}期连续历史记录。请手动补齐 CSV/Excel 后再运行。")
+    elif _already_consumed or _same_session_result:
+        st.success("这份历史数据的 V3.7 独立保留区间已经使用过。为避免测试集污染，已锁定重复运行。")
+        st.caption("请先下载本次研究结果并归档；只有加入新的手动开奖数据、形成新的数据指纹后，才可执行下一次联合实验。")
+    else:
+        st.info("正式运行参数已经按你的要求固定：500组配置、10注、3组随机种子、balanced目标。最低训练300期、外层2×30期、内层2×5期、独立保留100期。")
+        _run_joint = st.button("启动全模型联合优化（500组）", type="primary", use_container_width=True, key="v37_run_joint")
+        if _run_joint:
+            _progress = st.progress(0, text="初始化500组联合参数配置…")
+            _status = st.empty()
+            try:
+                def _joint_progress(done: int, total: int, label: str):
+                    _progress.progress(min(1.0, done / max(total, 1)), text=f"{label}：{done:,}/{total:,}")
+                    _status.caption(label)
+
+                _result = run_joint_optimization(
+                    df, budget=500, tickets_per_draw=10, n_seeds=3,
+                    minimum_train=300, holdout_draws=100,
+                    outer_folds=2, outer_validation_draws=30,
+                    inner_folds=2, inner_validation_draws=5,
+                    seed=2026, objective="balanced", progress_callback=_joint_progress,
+                )
+                st.session_state["v37_joint_result"] = _result
+                _metadata_for_archive = dict(_result["metadata"])
+                _metadata_for_archive["data_fingerprint"] = _metadata_for_archive.get("data_fingerprint_sha256")
+                _metadata_for_archive["holdout_evaluated"] = True
+                _metadata_for_archive["reserved_holdout_start_draw"] = _metadata_for_archive.get("holdout_start_draw")
+                _metadata_for_archive["reserved_holdout_end_draw"] = _metadata_for_archive.get("holdout_end_draw")
+                # It is a multi-model experiment, not evidence that any single
+                # model has passed verification; intentionally omit model_name.
+                st.session_state["v36_project_state"] = add_experiment(
+                    st.session_state.get("v36_project_state", new_project_state()),
+                    "V3.7全模型联合优化", _metadata_for_archive,
+                    _result["search_summary"].head(20).to_dict(orient="records"),
+                )
+                st.success(
+                    f"联合优化完成：{len(_result['search_summary']) - 1}组可调配置，"
+                    f"Pareto点{len(_result['pareto_front'])}个；耗时{_result['metadata']['elapsed_seconds']:.1f}秒。"
+                )
+            except Exception as exc:
+                st.error(f"全模型联合优化失败：{type(exc).__name__}: {exc}")
+
+    _joint_result = st.session_state.get("v37_joint_result")
+    if isinstance(_joint_result, dict) and _joint_result.get("metadata", {}).get("data_fingerprint_sha256") == _joint_fingerprint:
+        _jm = _joint_result["metadata"]
+        _chosen = _joint_result["selected_config"]
+        st.divider()
+        st.markdown("### 最终冻结配置")
+        _kpi = st.columns(4)
+        _kpi[0].metric("选中模型", _chosen["model_name"])
+        _kpi[1].metric("唯一配置预算", _jm["unique_configuration_budget"])
+        _kpi[2].metric("Pareto前沿点", len(_joint_result["pareto_front"]))
+        _kpi[3].metric("独立测试期数", _jm["holdout_draws"])
+        st.json(_chosen)
+
+        st.markdown("### 独立保留测试：冻结模型与随机基准")
+        st.dataframe(_joint_result["holdout_summary"], hide_index=True, use_container_width=True)
+        st.dataframe(_joint_result["holdout_detail"].head(20), hide_index=True, use_container_width=True)
+        st.markdown("### 外层嵌套滚动验证")
+        st.dataframe(_joint_result["outer_selections"], hide_index=True, use_container_width=True)
+        st.dataframe(_joint_result["outer_summary"], hide_index=True, use_container_width=True)
+
+        st.markdown("### Pareto候选方案")
+        st.dataframe(_joint_result["pareto_front"].head(100), hide_index=True, use_container_width=True)
+        _pareto_plot = _joint_result["pareto_front"].copy()
+        if not _pareto_plot.empty:
+            st.plotly_chart(
+                px.scatter(
+                    _pareto_plot, x="平均命中差_vs随机", y="整批3+差_vs随机",
+                    color="模型", hover_data=["配置编号", "balanced_score", "是否Pareto前沿"],
+                    title="Pareto前沿：平均命中差与整批3+差（相对随机）",
+                ),
+                use_container_width=True,
+            )
+        st.markdown("### 500组联合搜索排名")
+        st.dataframe(_joint_result["search_summary"].head(100), hide_index=True, use_container_width=True)
+
+        st.markdown("### 下载研究结果")
+        _d1, _d2, _d3 = st.columns(3)
+        _d1.download_button(
+            "下载500组参数排名 CSV",
+            _joint_result["search_summary"].to_csv(index=False).encode("utf-8-sig"),
+            "lotto645_v37_joint_search_ranking.csv", "text/csv",
+        )
+        _d2.download_button(
+            "下载Pareto前沿 CSV",
+            _joint_result["pareto_front"].to_csv(index=False).encode("utf-8-sig"),
+            "lotto645_v37_pareto_front.csv", "text/csv",
+        )
+        _d3.download_button(
+            "下载内层逐期评估 CSV",
+            _joint_result["inner_period_detail"].to_csv(index=False).encode("utf-8-sig"),
+            "lotto645_v37_inner_period_detail.csv", "text/csv",
+        )
+        _d4, _d5, _d6 = st.columns(3)
+        _d4.download_button(
+            "下载内层折汇总 CSV",
+            _joint_result["inner_fold_detail"].to_csv(index=False).encode("utf-8-sig"),
+            "lotto645_v37_inner_fold_detail.csv", "text/csv",
+        )
+        _d5.download_button(
+            "下载外层嵌套验证 CSV",
+            _joint_result["outer_detail"].to_csv(index=False).encode("utf-8-sig"),
+            "lotto645_v37_outer_validation.csv", "text/csv",
+        )
+        _d6.download_button(
+            "下载外层选型记录 CSV",
+            _joint_result["outer_selections"].to_csv(index=False).encode("utf-8-sig"),
+            "lotto645_v37_outer_selections.csv", "text/csv",
+        )
+        _d7, _d8, _d9 = st.columns(3)
+        _d7.download_button(
+            "下载保留集逐注号码 CSV",
+            _joint_result["holdout_ticket_detail"].to_csv(index=False).encode("utf-8-sig"),
+            "lotto645_v37_holdout_tickets.csv", "text/csv",
+        )
+        _d8.download_button(
+            "下载保留集配对检验 CSV",
+            _joint_result["holdout_summary"].to_csv(index=False).encode("utf-8-sig"),
+            "lotto645_v37_holdout_statistics.csv", "text/csv",
+        )
+        _d9.download_button(
+            "下载完整实验元数据 JSON",
+            json.dumps(_jm, ensure_ascii=False, indent=2),
+            "lotto645_v37_joint_metadata.json", "application/json",
+        )
+        st.download_button(
+            "下载模型实验档案（用于恢复保留集使用记录）",
+            export_project_state(st.session_state.get("v36_project_state", new_project_state())),
+            "lotto645_v37_model_archive.json", "application/json",
+        )
+        st.warning("最终保留集已经被这次冻结配置使用。不要根据它反复调整参数后再次运行；请保存模型实验档案。若 Streamlit 会话重置，先在‘模型管理’页导入该档案，以继续识别已使用的保留区间。")
+
 with page_ensemble:
     st.subheader("多模型集成实验")
     st.write("新策略融合近期频率、贝叶斯平滑和指数时间衰减。这里的权重是号码抽样权重，不是开奖概率。")
@@ -530,6 +708,43 @@ with page_models:
     else:
         st.caption("当前会话尚无实验记录。执行回测、参数搜索或保留区间验证后会自动记录摘要。")
     st.download_button("下载完整模型与实验档案 JSON", export_project_state(current_state), "lotto645_v361_model_archive.json", "application/json")
+
+    st.divider()
+    st.markdown("### 一键导出完整研究实验包")
+    st.write("将当前会话中已经生成的回测、参数搜索、保留区间、集成模型、组合优化和模型档案打包为一个 ZIP，方便交给助手进行完整审查。")
+    include_history = st.checkbox(
+        "同时包含当前清洗后的手动历史开奖数据（建议勾选，便于复核数据与回测范围）",
+        value=True, key="v362_export_include_history",
+    )
+    if st.button("生成完整研究实验 ZIP", type="primary", use_container_width=True, key="v362_build_research_bundle"):
+        try:
+            bundle_bytes, bundle_manifest = build_research_bundle(
+                df, quality, data_source, st.session_state, current_state, include_history=include_history,
+            )
+            st.session_state["v362_research_bundle_bytes"] = bundle_bytes
+            st.session_state["v362_research_bundle_manifest"] = bundle_manifest
+            st.success(f"研究实验包生成成功：{len(bundle_bytes):,} 字节；包含 {len(bundle_manifest['included_artifacts'])} 个文件。")
+        except Exception as exc:
+            st.error(f"研究实验包生成失败：{type(exc).__name__}: {exc}")
+    bundle_bytes = st.session_state.get("v362_research_bundle_bytes")
+    bundle_manifest = st.session_state.get("v362_research_bundle_manifest")
+    if isinstance(bundle_bytes, bytes) and bundle_bytes and isinstance(bundle_manifest, dict):
+        created_tag = str(bundle_manifest.get("created_at_utc", ""))[:19].replace(":", "").replace("-", "")
+        st.download_button(
+            "下载 Lotto 6/45 完整研究实验包 ZIP",
+            data=bundle_bytes,
+            file_name=f"lotto645_research_bundle_{created_tag or 'latest'}.zip",
+            mime="application/zip",
+            use_container_width=True,
+        )
+        with st.expander("查看本次打包内容"):
+            st.write({
+                "历史数据已包含": bundle_manifest.get("history_included"),
+                "历史期数": bundle_manifest.get("history_rows"),
+                "最新期号": bundle_manifest.get("history_last_draw"),
+                "已包含文件": bundle_manifest.get("included_artifacts"),
+                "未生成/不可用项目": bundle_manifest.get("unavailable_or_empty_artifacts"),
+            })
 
 with page_data:
     st.subheader("手动数据管理")

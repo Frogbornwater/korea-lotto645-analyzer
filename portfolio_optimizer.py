@@ -57,7 +57,7 @@ def optimize_portfolio(
         raise ValueError(f"未知模型：{model_name}")
     count = int(count)
     if count != 10:
-        raise ValueError("V3.6 当前组合优化模块固定输出10组号码。")
+        raise ValueError("V3.7 当前组合优化模块固定输出10组号码。")
     if not 0 <= int(max_overlap) <= 5:
         raise ValueError("最大组间重号限制必须在0—5之间。")
     candidate_pool_size = int(candidate_pool_size)
