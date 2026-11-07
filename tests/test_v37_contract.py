@@ -18,7 +18,7 @@ from model_registry import ENGINE_VERSION
 
 class V37DeploymentContractTests(unittest.TestCase):
     def test_engine_version_is_joint_release(self):
-        self.assertEqual(ENGINE_VERSION, "3.8.0-robust")
+        self.assertEqual(ENGINE_VERSION, "4.0.0-governed")
 
     def test_make_weights_accepts_joint_optimizer_eleven_argument_contract(self):
         signature = inspect.signature(backtest_engine._make_weights)
