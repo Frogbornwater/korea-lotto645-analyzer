@@ -18,7 +18,7 @@ from model_registry import ENGINE_VERSION
 
 class V37DeploymentContractTests(unittest.TestCase):
     def test_engine_version_is_joint_release(self):
-        self.assertEqual(ENGINE_VERSION, "3.7.0-joint")
+        self.assertEqual(ENGINE_VERSION, "3.8.0-robust")
 
     def test_make_weights_accepts_joint_optimizer_eleven_argument_contract(self):
         signature = inspect.signature(backtest_engine._make_weights)
@@ -57,7 +57,7 @@ class V37DeploymentContractTests(unittest.TestCase):
     def test_app_wires_joint_optimizer_and_displays_engine_version(self):
         source = (ROOT / "app.py").read_text(encoding="utf-8")
         self.assertIn("from joint_optimizer import run_joint_optimization", source)
-        self.assertIn('"全模型联合优化"', source)
+        self.assertIn("V3.7联合优化", source)
         self.assertIn("ENGINE_VERSION", source)
         self.assertIn("run_joint_optimization(", source)
 

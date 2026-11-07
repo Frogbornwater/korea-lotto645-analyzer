@@ -44,6 +44,41 @@ class ExperimentExportTests(unittest.TestCase):
             "v361_portfolio_report": {"不同号码数": 39},
             "secret_api_token": "must-not-export",
             "unrelated_widget_state": {"some": "value"},
+            "v37_joint_result": {
+                "search_summary": pd.DataFrame([{"配置编号": 1, "模型": "贝叶斯平滑模型"}]),
+                "pareto_front": pd.DataFrame([{"配置编号": 1}]),
+                "inner_period_detail": pd.DataFrame([{"期号": 20}]),
+                "inner_fold_detail": pd.DataFrame([{"内层折": 1}]),
+                "outer_detail": pd.DataFrame([{"期号": 21}]),
+                "outer_selections": pd.DataFrame([{"外层折": 1}]),
+                "outer_summary": pd.DataFrame([{"指标": "平均命中差_vs随机"}]),
+                "holdout_detail": pd.DataFrame([{"期号": 22}]),
+                "holdout_ticket_detail": pd.DataFrame([{"号码": "1-2-3-4-5-6"}]),
+                "holdout_summary": pd.DataFrame([{"指标": "平均命中差_vs随机"}]),
+                "selected_config": {"config_id": 1},
+                "metadata": {"experiment_type": "v37_joint_nested_automl"},
+            },
+            "v38_robust_result": {
+                "screen_summary": pd.DataFrame([{"配置编号": 1}]),
+                "finalist_summary": pd.DataFrame([{"配置编号": 1}]),
+                "predictive_pareto_front": pd.DataFrame([{"配置编号": 1}]),
+                "structure_pareto_front": pd.DataFrame([{"配置编号": 2}]),
+                "outer_detail": pd.DataFrame([{"期号": 30}]),
+                "outer_selections": pd.DataFrame([{"外层折": 1}]),
+                "outer_summary": pd.DataFrame([{"指标": "平均命中差_vs随机"}]),
+                "screen_period_detail": pd.DataFrame([{"期号": 10}]),
+                "screen_fold_detail": pd.DataFrame([{"内层折": 1}]),
+                "finalist_period_detail": pd.DataFrame([{"期号": 10}]),
+                "finalist_fold_detail": pd.DataFrame([{"内层折": 1}]),
+                "selected_config": {"config_id": 1},
+                "metadata": {"experiment_type": "v38_robust_dual_objective_research"},
+            },
+            "v38_forward_locks": {
+                "31": {
+                    "detail": pd.DataFrame([{"目标期号": 31, "n1": 1}]),
+                    "metadata": {"target_draw": 31, "history_last_draw": 30},
+                },
+            },
         }
         payload, manifest = build_research_bundle(
             history, {"rows": len(history), "range_complete": True},
@@ -56,6 +91,11 @@ class ExperimentExportTests(unittest.TestCase):
             self.assertIn("backtest/rolling_backtest_detail.csv", names)
             self.assertIn("parameter_search/parameter_search_ranking.csv", names)
             self.assertIn("portfolio/portfolio_quality_report.json", names)
+            self.assertIn("joint_optimization_v37/search_ranking.csv", names)
+            self.assertIn("joint_optimization_v37/holdout_tickets.csv", names)
+            self.assertIn("robust_research_v38/predictive_pareto_front.csv", names)
+            self.assertIn("robust_research_v38/structure_pareto_front.csv", names)
+            self.assertIn("forward_locks/draw_31/locked_tickets.csv", names)
             self.assertNotIn("secret_api_token", "\n".join(names))
             self.assertNotIn("must-not-export", zf.read("README_CN.txt").decode("utf-8"))
             stored_manifest = json.loads(zf.read("manifest.json"))

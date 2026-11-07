@@ -75,7 +75,7 @@ class ValidationTests(unittest.TestCase):
 class RegistryTests(unittest.TestCase):
     def test_registry_matches_core_models(self):
         self.assertEqual([x["name"] for x in get_model_registry()], MODEL_NAMES)
-        self.assertEqual(ENGINE_VERSION, "3.7.0-joint")
+        self.assertEqual(ENGINE_VERSION, "3.8.0-robust")
 
 
 class BacktestTests(unittest.TestCase):

@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Lotto 6/45 V3.7 joint AutoML console - offline/manual-data application."""
+"""Lotto 6/45 V3.8 robust research console - offline/manual-data application."""
 from __future__ import annotations
 
 import io
@@ -8,20 +8,16 @@ import inspect
 import sys
 from pathlib import Path
 
-# LOTTO645_RUNTIME_IMPORT_GUARD_V1
-# Always load this app's own modules before any same-named package/module elsewhere.
+# Always prioritize the app's own project directory before importing local modules.
 APP_DIR = Path(__file__).resolve().parent
 _APP_ROOT = str(APP_DIR)
 if _APP_ROOT in sys.path:
     sys.path.remove(_APP_ROOT)
 sys.path.insert(0, _APP_ROOT)
-
-# Streamlit reruns scripts in a long-lived process. Remove cached project modules
-# so every rerun binds the optimizer to the matching engine in this app directory.
 for _module_name in (
-    "backtest_engine", "joint_optimizer", "parameter_optimizer",
-    "portfolio_optimizer", "lotto_core", "model_registry",
-    "model_management", "experiment_export", "data_manager",
+    "backtest_engine", "joint_optimizer", "robust_optimizer", "parameter_optimizer",
+    "portfolio_optimizer", "lotto_core", "model_registry", "model_management",
+    "experiment_export", "data_manager",
 ):
     sys.modules.pop(_module_name, None)
 
@@ -31,6 +27,7 @@ import streamlit as st
 
 import backtest_engine as _runtime_backtest_engine
 import joint_optimizer as _runtime_joint_optimizer
+import robust_optimizer as _runtime_robust_optimizer
 
 from backtest_engine import run_backtest, run_multi_window_backtest
 from parameter_optimizer import (
@@ -38,6 +35,13 @@ from parameter_optimizer import (
 )
 from portfolio_optimizer import optimize_portfolio
 from joint_optimizer import run_joint_optimization
+from robust_optimizer import (
+    V38_RETROSPECTIVE_CUTOFF_DRAW,
+    build_forward_lock,
+    evaluate_forward_locks,
+    restore_forward_locks_from_bundle,
+    run_robust_research,
+)
 from model_management import (
     MODEL_STATUSES, add_experiment, change_model_status, export_project_state,
     import_project_state, new_project_state,
@@ -51,29 +55,27 @@ from lotto_core import (
 )
 from model_registry import ENGINE_VERSION
 
-_RUNTIME_ENGINE_PATH = str(Path(_runtime_backtest_engine.__file__).resolve())
-_RUNTIME_JOINT_PATH = str(Path(_runtime_joint_optimizer.__file__).resolve())
-_RUNTIME_ENGINE_SIGNATURE = str(inspect.signature(_runtime_backtest_engine._make_weights))
-_RUNTIME_JOINT_SIGNATURE = str(inspect.signature(_runtime_joint_optimizer._make_weights))
-_RUNTIME_SAME_FUNCTION = (
-    _runtime_joint_optimizer._make_weights is _runtime_backtest_engine._make_weights
-)
-_RUNTIME_SIGNATURE_OK = len(inspect.signature(_runtime_backtest_engine._make_weights).parameters) == 11
 _RUNTIME_MODULE_DIAGNOSTICS = {
     "app.py": str(Path(__file__).resolve()),
     "APP_DIR": str(APP_DIR),
-    "backtest_engine.__file__": _RUNTIME_ENGINE_PATH,
-    "joint_optimizer.__file__": _RUNTIME_JOINT_PATH,
-    "backtest_engine._make_weights": _RUNTIME_ENGINE_SIGNATURE,
-    "joint_optimizer._make_weights": _RUNTIME_JOINT_SIGNATURE,
-    "joint_optimizer_uses_same_function_object": _RUNTIME_SAME_FUNCTION,
-    "11_parameter_contract_ok": _RUNTIME_SIGNATURE_OK,
+    "backtest_engine.__file__": str(Path(_runtime_backtest_engine.__file__).resolve()),
+    "joint_optimizer.__file__": str(Path(_runtime_joint_optimizer.__file__).resolve()),
+    "robust_optimizer.__file__": str(Path(_runtime_robust_optimizer.__file__).resolve()),
+    "backtest_engine._make_weights": str(inspect.signature(_runtime_backtest_engine._make_weights)),
+    "joint_optimizer._make_weights": str(inspect.signature(_runtime_joint_optimizer._make_weights)),
+    "same_function_object": _runtime_joint_optimizer._make_weights is _runtime_backtest_engine._make_weights,
+    "11_parameter_contract_ok": len(inspect.signature(_runtime_backtest_engine._make_weights).parameters) == 11,
 }
 DATA_DIR = APP_DIR / "data"
 HISTORY_PATH = DATA_DIR / "lotto645.csv"
+EXPERIMENT_LEDGER_PATH = DATA_DIR / "experiment_ledger.json"
+try:
+    _EXPERIMENT_LEDGER = json.loads(EXPERIMENT_LEDGER_PATH.read_text(encoding="utf-8"))
+except (FileNotFoundError, json.JSONDecodeError, OSError):
+    _EXPERIMENT_LEDGER = {"experiments": [], "known_reviewed_ranges": []}
 
-st.set_page_config(page_title="Lotto 6/45 V3.7 · 全模型联合优化实验室", page_icon="🎯", layout="wide")
-st.title("🎯 韩国 Lotto 6/45 · V3.7 全模型联合优化实验室")
+st.set_page_config(page_title="Lotto 6/45 V3.8 · 稳健研究实验室", page_icon="🎯", layout="wide")
+st.title("🎯 韩国 Lotto 6/45 · V3.8 稳健研究实验室")
 st.caption("手动历史数据导入｜多模型分析｜可复现滚动回测｜研究与娱乐用途")
 
 
@@ -133,8 +135,8 @@ st.caption(f"数据来源：{data_source}｜引擎版本：{ENGINE_VERSION}｜�
 if "v36_project_state" not in st.session_state:
     st.session_state["v36_project_state"] = new_project_state()
 
-page_overview, page_pick, page_stats, page_backtest, page_optimizer, page_joint, page_ensemble, page_portfolio, page_models, page_data, page_review = st.tabs([
-    "系统总览", "智能选号", "历史统计", "回测中心", "单模型参数实验", "全模型联合优化", "模型集成", "组合优化", "模型管理", "数据管理", "选号复盘"
+page_overview, page_pick, page_stats, page_backtest, page_optimizer, page_joint, page_robust, page_ensemble, page_portfolio, page_models, page_data, page_review = st.tabs([
+    "系统总览", "智能选号", "历史统计", "回测中心", "单模型参数实验", "V3.7联合优化", "V3.8稳健研究", "模型集成", "组合优化", "模型管理", "数据管理", "选号复盘"
 ])
 
 with page_overview:
@@ -154,8 +156,7 @@ with page_overview:
     overview_cols[0].metric("已注册策略", len(MODEL_NAMES))
     overview_cols[1].metric("每次默认候选组数", 10)
     overview_cols[2].metric("外部数据连接", "未启用")
-    st.info("V3.7 全模型联合参数搜索、嵌套滚动验证、独立保留测试与 Pareto 多目标优化。模型表现只用于统计研究，不代表下一期开奖概率。")
-
+    st.info("V3.8 将预测表现与10注组合结构分开评价，并采用空间均衡参数搜索、多窗口嵌套滚动验证和优胜候选多种子复核。")
     with st.expander("运行环境诊断（模块路径与函数签名）"):
         st.json(_RUNTIME_MODULE_DIAGNOSTICS)
 
@@ -443,7 +444,7 @@ with page_optimizer:
             st.download_button("下载保留区间元数据", json.dumps(hold_meta, ensure_ascii=False, indent=2), "lotto645_v361_holdout_metadata.json", "application/json")
 
 with page_joint:
-    st.subheader("V3.7 全模型联合优化控制台")
+    st.subheader("V3.7 历史联合优化记录")
     st.markdown(
         "一次运行覆盖全部8种策略：7种可调模型共搜索500组唯一参数配置；"
         "均匀随机基准作为所有内层、外层和最终保留测试的共同配对对照，不参与参数调优。"
@@ -459,6 +460,22 @@ with page_joint:
         item.get("experiment_type") == "V3.7全模型联合优化"
         and item.get("data_fingerprint") == _joint_fingerprint
         for item in _project_state.get("experiments", [])
+    )
+    # The repository ledger survives Streamlit session resets. Protect the
+    # exact V3.7 data fingerprint and its previously inspected test range.
+    _ledger_v37_records = [
+        item for item in _EXPERIMENT_LEDGER.get("experiments", [])
+        if item.get("experiment_id") == "lotto645-v37-joint-20261107T083833Z-2026"
+        and item.get("holdout_consumed")
+    ]
+    _ledger_consumed = any(
+        item.get("data_fingerprint_sha256") == _joint_fingerprint
+        or (
+            int(item.get("data_first_draw", -1)) == int(quality["first_draw"])
+            and int(item.get("data_last_draw", -1)) == int(quality["last_draw"])
+            and int(item.get("data_rows", -1)) == int(quality["rows"])
+        )
+        for item in _ledger_v37_records
     )
     _existing_result = st.session_state.get("v37_joint_result")
     _same_session_result = (
@@ -486,8 +503,8 @@ with page_joint:
     _min_required = 300 + 2 * 5 + 2 * 30 + 100
     if len(df) < _min_required:
         st.error(f"当前只有{len(df)}期。按默认嵌套结构至少需要{_min_required}期连续历史记录。请手动补齐 CSV/Excel 后再运行。")
-    elif _already_consumed or _same_session_result:
-        st.success("这份历史数据的 V3.7 独立保留区间已经使用过。为避免测试集污染，已锁定重复运行。")
+    elif _already_consumed or _same_session_result or _ledger_consumed:
+        st.success("这份历史数据的 V3.7 独立保留区间已经使用过。仓库实验台账也已记录本次使用，不能重复运行。")
         st.caption("请先下载本次研究结果并归档；只有加入新的手动开奖数据、形成新的数据指纹后，才可执行下一次联合实验。")
     else:
         st.info("正式运行参数已经按你的要求固定：500组配置、10注、3组随机种子、balanced目标。最低训练300期、外层2×30期、内层2×5期、独立保留100期。")
@@ -526,8 +543,6 @@ with page_joint:
                 )
             except Exception as exc:
                 st.error(f"全模型联合优化失败：{type(exc).__name__}: {exc}")
-                with st.expander("运行时模块诊断"):
-                    st.json(_RUNTIME_MODULE_DIAGNOSTICS)
 
     _joint_result = st.session_state.get("v37_joint_result")
     if isinstance(_joint_result, dict) and _joint_result.get("metadata", {}).get("data_fingerprint_sha256") == _joint_fingerprint:
@@ -619,6 +634,199 @@ with page_joint:
             "lotto645_v37_model_archive.json", "application/json",
         )
         st.warning("最终保留集已经被这次冻结配置使用。不要根据它反复调整参数后再次运行；请保存模型实验档案。若 Streamlit 会话重置，先在‘模型管理’页导入该档案，以继续识别已使用的保留区间。")
+
+
+with page_robust:
+    st.subheader("V3.8 稳健模型研究引擎")
+    st.markdown(
+        "V3.8 不再把命中表现与组合多样性混为一个总分。系统先对7种可调模型进行500组空间均衡参数初筛，"
+        "再对每个模型的优胜候选进行3组随机种子复核。预测目标和组合结构目标分别排名。"
+    )
+    st.warning(
+        "V3.7 已经审阅第1089—1248期的外层验证和独立保留测试。为避免重复使用已看过的结果，"
+        "V3.8 的回溯评价默认只使用第1—1088期；这不是新的独立保留测试。真正的前瞻性证据必须在开奖前锁定号码，"
+        "随后再手动导入目标期开奖号码。"
+    )
+    st.write({
+        "参数配置预算": "500组（7种可调模型均衡分配）",
+        "参数空间设计": "每模型 Latin-hypercube 空间均衡采样",
+        "初筛随机种子": "1组（降低计算成本）",
+        "每模型优胜候选": "1组进入复核",
+        "复核随机种子": "3组",
+        "内层滚动窗口": "3个分散窗口 × 每窗口6期",
+        "外层滚动验证": "3折 × 每折12期",
+        "预测评价": "平均命中差、单注3+率差、整批3+差、跨窗口稳定性",
+        "组合结构评价": "号码覆盖差、组间重号减少（独立报告）",
+        "独立保留测试": "本次不重复使用已审阅区间；等待未来新期数开展前瞻验证",
+    })
+    _v38_cutoff = min(int(V38_RETROSPECTIVE_CUTOFF_DRAW), int(quality["last_draw"]))
+    _v38_safe = df[df["draw_no"] <= _v38_cutoff]
+    _v38_minimum = 300 + max(3 * 4, 3 * 6) + 3 * 12
+    st.caption(
+        f"本次安全回溯数据：第{quality['first_draw']}—{_v38_cutoff}期；"
+        f"共{len(_v38_safe)}期。第1089—1248期不作为本次V3.8回溯验证标签。"
+    )
+    if len(_v38_safe) < _v38_minimum:
+        st.error(f"安全回溯区间至少需要{_v38_minimum}期连续记录；目前只有{len(_v38_safe)}期。")
+    else:
+        if st.button("启动 V3.8 稳健研究（500组）", type="primary", use_container_width=True, key="v38_run_robust"):
+            _v38_progress = st.progress(0, text="生成500组空间均衡参数…")
+            _v38_status = st.empty()
+            try:
+                def _v38_progress_callback(done: int, total: int, label: str):
+                    _v38_progress.progress(min(1.0, done / max(total, 1)), text=f"{label}：{done:,}/{total:,}")
+                    _v38_status.caption(label)
+
+                _v38_result = run_robust_research(
+                    df, budget=500, tickets_per_draw=10, minimum_train=300,
+                    outer_folds=3, outer_validation_draws=12,
+                    inner_folds=3, inner_validation_draws=6,
+                    finalists_per_model=1, screening_folds=3, screening_window_draws=4,
+                    screening_seeds=1, finalist_seeds=3,
+                    seed=2028, retrospective_cutoff_draw=_v38_cutoff,
+                    progress_callback=_v38_progress_callback,
+                )
+                st.session_state["v38_robust_result"] = _v38_result
+                _v38_meta = dict(_v38_result["metadata"])
+                _v38_meta["data_fingerprint"] = _v38_meta.get("full_data_fingerprint_sha256")
+                _v38_meta["holdout_evaluated"] = False
+                st.session_state["v36_project_state"] = add_experiment(
+                    st.session_state.get("v36_project_state", new_project_state()),
+                    "V3.8多窗口稳健研究", _v38_meta,
+                    _v38_result["finalist_summary"].head(20).to_dict(orient="records"),
+                )
+                st.success(
+                    f"V3.8回溯研究完成：500组初筛；每模型优胜候选3种子复核；"
+                    f"耗时{_v38_result['metadata']['elapsed_seconds']:.1f}秒。"
+                )
+            except Exception as exc:
+                st.error(f"V3.8稳健研究失败：{type(exc).__name__}: {exc}")
+
+    _v38_result = st.session_state.get("v38_robust_result")
+    _v38_current_fingerprint = _hashlib.sha256(df.to_csv(index=False).encode("utf-8")).hexdigest()
+    _v38_result_matches_current = (
+        isinstance(_v38_result, dict)
+        and _v38_result.get("metadata", {}).get("full_data_fingerprint_sha256") == _v38_current_fingerprint
+    )
+    if isinstance(_v38_result, dict) and not _v38_result_matches_current:
+        st.warning("当前手动历史数据与本次 V3.8 研究使用的数据版本不同。旧研究结果仅供归档查看，不会用于当前数据生成新的锁定号码。")
+    if isinstance(_v38_result, dict):
+        _v38_meta = _v38_result["metadata"]
+        _v38_selected = _v38_result["selected_config"]
+        st.divider()
+        st.markdown("### 研究结论与冻结候选")
+        st.warning(_v38_meta["predictive_advantage_status"])
+        _v38_kpi = st.columns(4)
+        _v38_kpi[0].metric("初筛配置", _v38_meta["unique_configuration_budget"])
+        _v38_kpi[1].metric("每模型优胜复核", f"{_v38_meta['finalists_per_model']}组")
+        _v38_kpi[2].metric("外层验证期数", _v38_meta["outer_folds"] * _v38_meta["outer_validation_draws_per_fold"])
+        _v38_kpi[3].metric("是否使用新保留集", "否")
+        st.write("预测表现候选（预测综合分不包含号码覆盖与组间重号）：")
+        st.json(_v38_selected)
+        st.markdown("### 外层嵌套滚动验证")
+        st.dataframe(_v38_result["outer_selections"], hide_index=True, use_container_width=True)
+        st.dataframe(_v38_result["outer_summary"], hide_index=True, use_container_width=True)
+        st.markdown("### 优胜候选：预测表现排名")
+        st.dataframe(_v38_result["finalist_summary"].head(50), hide_index=True, use_container_width=True)
+        st.markdown("### 预测表现 Pareto 前沿")
+        st.dataframe(_v38_result["predictive_pareto_front"], hide_index=True, use_container_width=True)
+        st.markdown("### 组合结构 Pareto 前沿（不代表预测优势）")
+        st.dataframe(_v38_result["structure_pareto_front"], hide_index=True, use_container_width=True)
+        _v38_downloads = st.columns(3)
+        _v38_downloads[0].download_button(
+            "下载500组初筛排名", _v38_result["screen_summary"].to_csv(index=False).encode("utf-8-sig"),
+            "lotto645_v38_screen_ranking.csv", "text/csv",
+        )
+        _v38_downloads[1].download_button(
+            "下载优胜复核排名", _v38_result["finalist_summary"].to_csv(index=False).encode("utf-8-sig"),
+            "lotto645_v38_finalist_ranking.csv", "text/csv",
+        )
+        _v38_downloads[2].download_button(
+            "下载外层验证明细", _v38_result["outer_detail"].to_csv(index=False).encode("utf-8-sig"),
+            "lotto645_v38_outer_validation.csv", "text/csv",
+        )
+        _v38_downloads2 = st.columns(3)
+        _v38_downloads2[0].download_button(
+            "下载预测 Pareto", _v38_result["predictive_pareto_front"].to_csv(index=False).encode("utf-8-sig"),
+            "lotto645_v38_predictive_pareto.csv", "text/csv",
+        )
+        _v38_downloads2[1].download_button(
+            "下载结构 Pareto", _v38_result["structure_pareto_front"].to_csv(index=False).encode("utf-8-sig"),
+            "lotto645_v38_structure_pareto.csv", "text/csv",
+        )
+        _v38_downloads2[2].download_button(
+            "下载完整研究元数据", json.dumps(_v38_meta, ensure_ascii=False, indent=2),
+            "lotto645_v38_metadata.json", "application/json",
+        )
+
+        st.divider()
+        st.markdown("### 前瞻性预测锁定")
+        st.write(
+            "冻结上方选出的参数后，可生成下一期模型与均匀随机基准各10注×3组种子的锁定记录。"
+            "锁定文件必须在目标期开奖号码公布前保存；导入后续手动历史数据后，系统才会计算命中结果。"
+        )
+        if "v38_forward_locks" not in st.session_state:
+            st.session_state["v38_forward_locks"] = {}
+        _v38_locks = st.session_state["v38_forward_locks"]
+        _v38_next_draw = int(quality["last_draw"]) + 1
+        if str(_v38_next_draw) in _v38_locks:
+            st.success(f"第{_v38_next_draw}期已经存在前瞻锁定记录。为避免重复尝试，不能再次生成。")
+        elif st.button("锁定下一期模型与随机基准号码", key="v38_lock_next_draw", use_container_width=True, disabled=not _v38_result_matches_current):
+            try:
+                _lock_detail, _lock_meta = build_forward_lock(
+                    df, _v38_selected, tickets_per_draw=10, seed_groups=3,
+                    seed=2028,
+                )
+                st.session_state["v38_forward_locks"][str(_lock_meta["target_draw"])] = {
+                    "detail": _lock_detail,
+                    "metadata": _lock_meta,
+                }
+                st.success(f"第{_lock_meta['target_draw']}期前瞻锁定记录已生成。请立即下载并在开奖前保存。")
+            except Exception as exc:
+                st.error(f"生成前瞻锁定记录失败：{type(exc).__name__}: {exc}")
+        _restore_lock_zip = st.file_uploader(
+            "恢复以前保存的完整研究 ZIP（只导入其中的 V3.8 前瞻锁定记录）",
+            type=["zip"], key="v38_restore_lock_bundle",
+        )
+        if _restore_lock_zip is not None and st.button("恢复 ZIP 中的前瞻锁定记录", key="v38_import_lock_bundle"):
+            try:
+                _restored_locks = restore_forward_locks_from_bundle(_restore_lock_zip.getvalue())
+                _merged_locks = dict(st.session_state.get("v38_forward_locks", {}))
+                for _target_key, _lock in _restored_locks.items():
+                    if _target_key in _merged_locks:
+                        raise ValueError(f"当前会话已经存在第{_target_key}期锁定记录，未覆盖现有记录。")
+                    _merged_locks[_target_key] = _lock
+                st.session_state["v38_forward_locks"] = _merged_locks
+                st.success(f"已恢复{len(_restored_locks)}期前瞻锁定记录。")
+            except Exception as exc:
+                st.error(f"前瞻锁定记录恢复失败：{type(exc).__name__}: {exc}")
+        _v38_lock_map = st.session_state.get("v38_forward_locks", {})
+        for _target_key, _lock in sorted(_v38_lock_map.items(), key=lambda item: int(item[0])):
+            _lock_detail = _lock.get("detail")
+            _lock_meta = _lock.get("metadata", {})
+            if isinstance(_lock_detail, pd.DataFrame) and not _lock_detail.empty:
+                st.caption(f"前瞻锁定：第{_target_key}期；锁定时历史末期：{_lock_meta.get('history_last_draw')}；时间UTC：{_lock_meta.get('created_at_utc')}")
+                st.download_button(
+                    f"下载第{_target_key}期锁定号码 CSV",
+                    _lock_detail.to_csv(index=False).encode("utf-8-sig"),
+                    f"lotto645_v38_draw_{_target_key}_locked_tickets.csv", "text/csv",
+                    key=f"v38_lock_csv_{_target_key}",
+                )
+                st.download_button(
+                    f"下载第{_target_key}期锁定元数据 JSON",
+                    json.dumps(_lock_meta, ensure_ascii=False, indent=2),
+                    f"lotto645_v38_draw_{_target_key}_lock_metadata.json", "application/json",
+                    key=f"v38_lock_meta_{_target_key}",
+                )
+        _v38_scored_detail, _v38_scored_summary = evaluate_forward_locks(df, _v38_lock_map)
+        if not _v38_scored_detail.empty:
+            st.markdown("### 已导入开奖结果的前瞻锁定复盘")
+            st.warning("系统确认目标期号在锁定时历史末期之后，但不能独立验证你是否在开奖前下载/保存了锁定文件。请保留锁定时间与原始文件，供审计。")
+            st.dataframe(_v38_scored_summary, hide_index=True, use_container_width=True)
+            st.download_button(
+                "下载前瞻锁定复盘明细", _v38_scored_detail.to_csv(index=False).encode("utf-8-sig"),
+                "lotto645_v38_forward_validation_detail.csv", "text/csv",
+            )
 
 with page_ensemble:
     st.subheader("多模型集成实验")

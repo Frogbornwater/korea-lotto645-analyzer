@@ -16,7 +16,7 @@ from typing import Any, Mapping
 import pandas as pd
 
 EXPORT_SCHEMA_VERSION = 1
-ENGINE_VERSION = "3.6.2"
+ENGINE_VERSION = "3.8.0-robust"
 
 # Session-state key -> folder / file stem / artifact type.
 _ARTIFACTS = {
@@ -125,6 +125,98 @@ def build_research_bundle(
             zf.writestr(path, payload)
             included.append(path)
 
+        # V3.7's joint optimizer stores multiple DataFrames inside one known
+        # session-state result. Export only these explicit keys; never walk the
+        # arbitrary session state or serialize secrets/widget values.
+        joint_result_exports = {
+            "v37_joint_result": {
+                "prefix": "joint_optimization_v37",
+                "dataframes": {
+                    "search_summary": "search_ranking.csv",
+                    "pareto_front": "pareto_front.csv",
+                    "inner_period_detail": "inner_period_detail.csv",
+                    "inner_fold_detail": "inner_fold_detail.csv",
+                    "outer_detail": "outer_validation.csv",
+                    "outer_selections": "outer_selections.csv",
+                    "outer_summary": "outer_summary.csv",
+                    "holdout_detail": "holdout_period_detail.csv",
+                    "holdout_ticket_detail": "holdout_tickets.csv",
+                    "holdout_summary": "holdout_statistics.csv",
+                },
+                "json": ["selected_config", "metadata"],
+            },
+            "v38_robust_result": {
+                "prefix": "robust_research_v38",
+                "dataframes": {
+                    "screen_summary": "500_config_screen_ranking.csv",
+                    "screen_period_detail": "screen_period_detail.csv",
+                    "screen_fold_detail": "screen_fold_detail.csv",
+                    "finalist_summary": "finalist_refinement_ranking.csv",
+                    "finalist_period_detail": "finalist_period_detail.csv",
+                    "finalist_fold_detail": "finalist_fold_detail.csv",
+                    "predictive_pareto_front": "predictive_pareto_front.csv",
+                    "structure_pareto_front": "structure_pareto_front.csv",
+                    "outer_detail": "outer_rolling_validation.csv",
+                    "outer_selections": "outer_selections.csv",
+                    "outer_summary": "outer_summary.csv",
+                },
+                "json": ["selected_config", "metadata"],
+            },
+        }
+        result_exports: dict[str, list[str]] = {}
+        for state_key, spec in joint_result_exports.items():
+            result = session_state.get(state_key)
+            if not isinstance(result, dict):
+                missing.append(state_key)
+                continue
+            paths: list[str] = []
+            prefix = str(spec["prefix"])
+            for field, filename in spec["dataframes"].items():
+                value = result.get(field)
+                if not isinstance(value, pd.DataFrame) or value.empty:
+                    missing.append(f"{state_key}.{field}")
+                    continue
+                path = f"{prefix}/{filename}"
+                zf.writestr(path, value.to_csv(index=False).encode("utf-8-sig"))
+                included.append(path)
+                paths.append(path)
+            for field in spec["json"]:
+                value = result.get(field)
+                if value is None:
+                    missing.append(f"{state_key}.{field}")
+                    continue
+                try:
+                    payload = json.dumps(_json_safe(value), ensure_ascii=False, indent=2, allow_nan=False).encode("utf-8")
+                except (TypeError, ValueError) as exc:
+                    missing.append(f"{state_key}.{field} (JSON serialization failed: {exc})")
+                    continue
+                path = f"{prefix}/{field}.json"
+                zf.writestr(path, payload)
+                included.append(path)
+                paths.append(path)
+            result_exports[state_key] = paths
+
+        # Forward locks are also an explicit allow-list: each value must contain
+        # exactly the known {detail: DataFrame, metadata: dict} structure.
+        forward_locks = session_state.get("v38_forward_locks")
+        if isinstance(forward_locks, dict):
+            for target_draw, lock in sorted(forward_locks.items(), key=lambda item: int(item[0])):
+                if not isinstance(lock, dict):
+                    continue
+                detail = lock.get("detail")
+                metadata = lock.get("metadata")
+                if not isinstance(detail, pd.DataFrame) or detail.empty or not isinstance(metadata, dict):
+                    missing.append(f"v38_forward_locks.{target_draw}")
+                    continue
+                folder = f"forward_locks/draw_{int(target_draw)}"
+                csv_path = f"{folder}/locked_tickets.csv"
+                json_path = f"{folder}/lock_metadata.json"
+                zf.writestr(csv_path, detail.to_csv(index=False).encode("utf-8-sig"))
+                zf.writestr(json_path, json.dumps(_json_safe(metadata), ensure_ascii=False, indent=2, allow_nan=False).encode("utf-8"))
+                included.extend([csv_path, json_path])
+        else:
+            missing.append("v38_forward_locks")
+
         manifest = {
             "export_schema_version": EXPORT_SCHEMA_VERSION,
             "export_version": ENGINE_VERSION,
@@ -139,9 +231,12 @@ def build_research_bundle(
             "history_included": bool(include_history),
             "quality_report": _json_safe(dict(quality)),
             "included_artifacts": included,
+            "research_result_exports": result_exports,
             "unavailable_or_empty_artifacts": missing,
             "notes": [
                 "This bundle contains only allow-listed current-session research artifacts.",
+                "V3.7 joint-result DataFrames and metadata are explicitly exported when present.",
+                "V3.8 predictive ranking and portfolio-structure ranking are separate objectives.",
                 "A missing artifact means it was not generated or is not present in this Streamlit session.",
                 "Parameter-search rankings are exploratory and are not proof of predictive advantage.",
                 "The historical draws are manually supplied by the user; no official lottery website was accessed.",
@@ -155,7 +250,7 @@ def build_research_bundle(
             "README_CN.txt",
             (
                 "Lotto 6/45 研究实验包\n\n"
-                "本压缩包用于审查当前 Streamlit 会话中的回测、参数搜索、保留区间、集成和组合优化结果。\n"
+                "本压缩包用于审查当前 Streamlit 会话中的回测、V3.7联合优化、V3.8稳健研究、前瞻锁定和模型档案。\n"
                 "manifest.json 列出实际包含的文件及未生成的文件。\n\n"
                 "数据规则：仅使用用户手动导入的 CSV/Excel；不连接韩国 Lotto 官网、API 或抓取服务。\n"
                 "请注意：参数搜索第一名属于探索性结果，不代表统计显著或未来预测能力。\n"
