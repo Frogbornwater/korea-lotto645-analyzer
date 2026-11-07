@@ -1,0 +1,37 @@
+{
+  "schema_version": 1,
+  "policy": "offline_manual_history_only",
+  "description": "Persistent record of previously inspected experiment windows. Do not delete when updating application code.",
+  "experiments": [
+    {
+      "experiment_id": "lotto645-v37-joint-20261107T083833Z-2026",
+      "experiment_type": "V3.7全模型联合优化",
+      "engine_version": "3.7.0-joint",
+      "created_at_utc": "2026-11-07T08:38:33+00:00",
+      "data_first_draw": 1,
+      "data_last_draw": 1248,
+      "data_rows": 1248,
+      "data_fingerprint_sha256": "a1a9addbc761d9a10aae84c657cec94e8bb0009cd36a4cb7631126c38105bf26",
+      "outer_validation_range": [1089, 1148],
+      "consumed_holdout_range": [1149, 1248],
+      "holdout_evaluated": true,
+      "holdout_consumed": true,
+      "selected_configuration": {
+        "config_id": 256,
+        "model_name": "贝叶斯平滑模型",
+        "params": {
+          "bayes_prior": 23.509712
+        }
+      },
+      "rule": "1089-1248期已在V3.7分析中被检查。不得再次称为未使用的独立测试区间。V3.8历史回溯验证截止第1088期。"
+    }
+  ],
+  "known_reviewed_ranges": [
+    {
+      "start_draw": 1089,
+      "end_draw": 1248,
+      "experiment_id": "lotto645-v37-joint-20261107T083833Z-2026",
+      "status": "reviewed_do_not_reuse_as_unseen_test"
+    }
+  ]
+}
