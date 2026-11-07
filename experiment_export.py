@@ -16,7 +16,7 @@ from typing import Any, Mapping
 import pandas as pd
 
 EXPORT_SCHEMA_VERSION = 1
-ENGINE_VERSION = "3.8.0-robust"
+ENGINE_VERSION = "4.0.0-governed"
 
 # Session-state key -> folder / file stem / artifact type.
 _ARTIFACTS = {

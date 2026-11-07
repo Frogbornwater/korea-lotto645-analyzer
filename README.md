@@ -1,118 +1,40 @@
-# Lotto 6/45 V3.8 — 稳健研究与前瞻验证平台
+# Lotto 6/45 V4.0 — Governed Research Platform
 
-V3.8 在保留 V3.6.1 / V3.7 功能的基础上，增加多窗口稳健研究、预测与组合结构分轨评价、空间均衡参数设计、优胜候选多种子复核、前瞻锁定记录，并修复完整研究包对 V3.7 / V3.8 实验结果的导出遗漏。
+V4.0 consolidates the V3.8 engine into a governed research workflow: immutable selection snapshots, append-only experiment events, strict manual draw append, paired draw-level forward evaluation, and explicit model-promotion gates. The existing V3.6.1, V3.7 and V3.8 model research tools remain available for compatibility.
 
-## 固定数据政策
+## Data policy
 
-- **禁止连接韩国 Lotto / 동행복권 官方网站及其 API。**
-- 禁止自动爬取、定时同步、第三方镜像拉取或后台开奖数据刷新。
-- 仅分析用户手动导入的 CSV、XLSX、XLS，或仓库 `data/lotto645.csv` 中由用户手动维护的数据。
-- `sync_data.py` 是安全停用入口，不执行网络访问。
-- 不要把回测明细 CSV 当成开奖历史数据。
+- Draw history is manual CSV / XLSX / XLS import only.
+- No Korean Lotto official website, official API, scraping, third-party result mirror, scheduled result refresh, or hidden draw-data fetch is permitted.
+- GitHub API support in v40_store.py is solely for storing the user's own experiment metadata and forward-lock artifacts in a separate research-data branch. It is not used to retrieve lottery results.
+- Never overwrite data/lotto645.csv, data/sync_status.json, or data/experiment_ledger.json during an application-code deployment.
 
-## V3.8 设计
+## V4.0 foundations
 
-### A. 稳健模型研究引擎
+1. Canonical data identity — normalized CSV SHA-256 fingerprints for complete history and for the fixed selection window.
+2. Strict append — append_draw accepts only the next draw, validates six distinct main numbers and a distinct bonus, rejects conflicting duplicates and gaps, and treats an identical duplicate as idempotent.
+3. Selection snapshot identity — research results are checked against the fixed V3.8 retrospective selection slice (through draw 1088), not the ever-growing full history. New results can be scored without silently re-optimizing the frozen model.
+4. Append-only event archive — model snapshots, manual data additions and pre-draw locks are versioned JSON events. Archives can be exported and restored; lock import is allow-listed and validates ticket records.
+5. Forward evidence — paired comparisons aggregate at draw level, then use moving-block bootstrap confidence intervals and Holm correction. Ticket rows are not treated as independent draws.
+6. Promotion governance — the default promotion gate requires at least 100 forward draws, all three primary point estimates positive, all block-bootstrap 95% confidence intervals above zero, and all Holm-adjusted p-values below 0.05. This is a conservative research governance rule, not a claim that an independent fair lottery can be predicted.
 
-| 项目 | V3.8 设置 |
-|---|---:|
-| 可调模型 | 7种；均匀随机为配对基准 |
-| 参数配置预算 | 500组唯一配置 |
-| 参数空间 | 每个模型分别进行 Latin-hypercube 空间均衡采样 |
-| 初筛 | 3个分散窗口 × 每窗口4期；1组随机种子，降低计算成本 |
-| 优胜候选 | 每个模型前1组进入复核 |
-| 复核 | 3组随机种子 |
-| 优胜候选复核 | 3个分散、互不重叠窗口 × 每窗口6期 |
-| 外层验证 | 3折 × 每折12期 |
-| 每期每模型 | 10注 |
+## Persistent research storage (optional)
 
-内层每个目标期的模型特征只使用目标期之前的数据。外层每折先在其训练前缀内完成500组初筛和优胜候选复核，再使用该折未来12期进行回溯式样本外评估。
+The app works without a token and provides export/import JSON archives. To persist research events in a separate GitHub branch across Streamlit restarts, add a Streamlit secret:
 
-### B. 预测表现与组合结构分轨
+    GITHUB_RESEARCH_TOKEN = YOUR_FINE_GRAINED_TOKEN
 
-预测综合分只包含：
-1. 相对随机的平均命中数差；
-2. 相对随机的单注3+率差；
-3. 相对随机的整批3+比例差；
-4. 跨内层窗口稳定性。
+The token should be scoped to this repository with Contents read/write permission. The application only writes v40_store/events.jsonl on research-data; it does not modify main or the draw CSV. Keep the token out of the repository and never paste it into chat.
 
-组合结构综合分单独包含：
-- 相对随机的号码覆盖差；
-- 相对随机的组间重号减少。
+## Tests
 
-覆盖率和重号减少不参与预测综合分。系统不会仅因某个候选相对排名第一就宣称它具有预测优势；如果主要命中指标没有同时超过随机，页面会明确显示“尚无预测优势证据”。
+From the complete repository root:
 
-### C. 已审阅历史窗口保护
+    python -m compileall -q .
+    python -m unittest discover -s tests -v
 
-V3.7 实验已经审阅第1089—1148期外层验证和第1149—1248期独立保留测试。为了不把已经看过的结果重新包装成新的测试，V3.8 默认只使用第1—1088期作为历史稳健研究区间。
+The V4.0 tests cover strict append, canonical fingerprints, block-bootstrap reproducibility, multiple-comparison correction, event archive round-tripping, forward-lock recovery and evidence gates. Synthetic tests validate software behavior only; they do not establish predictive advantage.
 
-- V3.8 当前回溯结果不是新的独立保留测试。
-- 第1089—1248期可作为已知历史，在生成未来候选时使用；不得再次称为未使用测试区间。
-- `data/experiment_ledger.json` 记录已审阅区间，更新代码时必须保留该文件。
+## Deployment
 
-### D. 前瞻锁定
-
-V3.8 可将冻结的最终研究候选应用于当前全部已知手动历史，生成下一期：
-- 模型10注 × 3组随机种子；
-- 均匀随机基准10注 × 3组随机种子。
-
-锁定文件记录目标期号、锁定时间、历史数据指纹、模型参数与随机种子。目标期开奖号码在锁定后手动导入时，应用可以计算逐注命中与分组汇总。
-
-**必须在目标期开奖前下载并保存锁定文件。** 应用只能检查目标期号晚于锁定时的历史末期，不能独立证明用户下载时间早于开奖公布时间；因此前瞻结果仍需保留锁定原件供审计。
-
-## 一键实验导出（V3.7.2）
-
-完整研究 ZIP 现包含：
-- V3.7：500组参数排名、Pareto、内外层逐期/折汇总、独立保留测试逐注与元数据；
-- V3.8：500组初筛、优胜候选复核、预测 Pareto、结构 Pareto、外层滚动验证和元数据；
-- 已生成的前瞻锁定号码与锁定元数据；
-- 模型实验档案；
-- 用户可选择是否包含清洗后的手动历史数据。
-
-导出器只读取明确列出的 session-state 键，不收集环境变量、密钥或任意会话内容。
-
-## GitHub / Streamlit 部署（无需本地安装 Python）
-
-1. 先下载当前 GitHub 仓库 ZIP 备份。
-2. 解压本升级包。
-3. 在仓库根目录替换：
-   - `app.py`
-   - `experiment_export.py`
-   - `model_registry.py`
-   - `README.md`
-4. 在仓库根目录新增：
-   - `robust_optimizer.py`
-5. 上传整个 `tests/` 文件夹（建议）。
-6. 将升级包中的 `data/experiment_ledger.json` **新增到现有仓库的 `data/` 文件夹**。不要用升级包里的 `data/` 目录替换你自己的目录。
-7. **保留原仓库的 `data/lotto645.csv` 和 `data/sync_status.json`（如有），不要覆盖或删除。**
-8. 保留 V3.7 其他模块：`backtest_engine.py`、`joint_optimizer.py`、`lotto_core.py`、`parameter_optimizer.py`、`portfolio_optimizer.py`、`data_manager.py`、`model_management.py`、`sync_data.py` 和 `requirements.txt`。
-9. 确认 GitHub Actions 中没有任何自动抓取/同步开奖数据的 workflow。
-10. Commit 到 `main`，等待 Streamlit Cloud 部署完成。
-
-建议提交说明：`Upgrade to Lotto 6/45 V3.8 robust research`。
-
-## V3.8 部署验收
-
-- 首页显示引擎版本 `3.8.0-robust`。
-- 「V3.8稳健研究」页面可打开。
-- 500组参数空间均衡初筛完整；7种可调模型分配数差不超过1。
-- 优胜候选每个模型1组，并经过3种子复核。
-- 预测综合分不包含号码覆盖与组间重号；两个 Pareto 前沿分开显示。
-- 3折外层验证只使用各自训练前缀之前的数据选型。
-- 当前历史数据仅回溯到第1088期，避免重复使用1089—1248期已审阅区间。
-- 可生成下一期预测锁定 CSV / JSON，并在后续手动导入结果后进行评分。
-- 一键研究 ZIP 包含 V3.7 / V3.8 联合结果和锁定结果。
-- 所有模块无官方站点/API/爬取/定时同步调用。
-
-## 自动测试
-
-```bash
-python -m compileall -q .
-python -m unittest discover -s tests -v
-```
-
-升级包是对现有 V3.7 仓库的补丁，不包含所有未修改的依赖模块。因此，`tests/` 应在把补丁覆盖/新增到完整仓库后，从完整仓库根目录运行；仅在解压补丁目录中单独运行测试会因缺少未修改的 V3.7 模块而无法导入。交付报告记录了完整工作树中的测试结果。合成数据测试验证代码逻辑，不证明任何模型拥有未来预测优势。真实历史数据的500组基准试跑约29.9秒；云端耗时会受运行资源影响。
-
-## 统计解释边界
-
-公平且独立开奖下，每一个固定六号码组合的头奖概率相同。历史回测、参数排名、Pareto 前沿、号码覆盖和前瞻锁定记录不自动等于预测优势。只有事先锁定的未来预测、足够长的前瞻样本和适当的不确定性分析，才可用于进一步评价模型表现。
+The V4.0 work is prepared on branch v4.0-architecture first. Review and merge its pull request only after GitHub Actions passes. The production main branch remains the V3.8 rollback baseline until then.

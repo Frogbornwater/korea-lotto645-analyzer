@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Lotto 6/45 V3.8 robust research console - offline/manual-data application."""
+"""Lotto 6/45 V4.0 governed research console - offline/manual-data application."""
 from __future__ import annotations
 
 import io
@@ -17,7 +17,7 @@ sys.path.insert(0, _APP_ROOT)
 for _module_name in (
     "backtest_engine", "joint_optimizer", "robust_optimizer", "parameter_optimizer",
     "portfolio_optimizer", "lotto_core", "model_registry", "model_management",
-    "experiment_export", "data_manager",
+    "experiment_export", "data_manager", "v40_governance", "v40_store",
 ):
     sys.modules.pop(_module_name, None)
 
@@ -54,6 +54,17 @@ from lotto_core import (
     theoretical_random_metrics, validate_frame,
 )
 from model_registry import ENGINE_VERSION
+from v40_governance import (
+    append_draw as v40_append_draw,
+    data_fingerprint as v40_data_fingerprint,
+    make_event as v40_make_event,
+    evaluate_forward_pairs as v40_evaluate_forward_pairs,
+)
+from v40_store import (
+    EventStoreError, GitHubEventStore, export_event_archive,
+    import_event_archive, latest_model_snapshot, events_to_forward_locks,
+)
+
 
 _RUNTIME_MODULE_DIAGNOSTICS = {
     "app.py": str(Path(__file__).resolve()),
@@ -74,9 +85,29 @@ try:
 except (FileNotFoundError, json.JSONDecodeError, OSError):
     _EXPERIMENT_LEDGER = {"experiments": [], "known_reviewed_ranges": []}
 
-st.set_page_config(page_title="Lotto 6/45 V3.8 · 稳健研究实验室", page_icon="🎯", layout="wide")
-st.title("🎯 韩国 Lotto 6/45 · V3.8 稳健研究实验室")
+st.set_page_config(page_title="Lotto 6/45 V4.0 · 研究治理平台", page_icon="🎯", layout="wide")
+st.title("🎯 韩国 Lotto 6/45 · V4.0 研究治理平台")
 st.caption("手动历史数据导入｜多模型分析｜可复现滚动回测｜研究与娱乐用途")
+
+if "v40_events" not in st.session_state:
+    st.session_state["v40_events"] = []
+
+def _v40_add_event(event: dict) -> None:
+    """Append an auditable event and optionally persist it on the research branch."""
+    events = list(st.session_state.get("v40_events", []))
+    if any(item.get("event_id") == event.get("event_id") for item in events):
+        return
+    events.append(event)
+    st.session_state["v40_events"] = events
+    try:
+        token = st.secrets.get("GITHUB_RESEARCH_TOKEN", "")
+        if token:
+            store = GitHubEventStore(
+                "Frogbornwater/korea-lotto645-analyzer", str(token), branch="research-data"
+            )
+            store.append_event(event)
+    except Exception as exc:
+        st.warning(f"实验事件暂存在当前会话；GitHub研究档案同步失败：{exc}")
 
 
 def read_uploaded_history(uploaded_file):
@@ -98,6 +129,11 @@ try:
     if upload is not None:
         df, history_report = read_uploaded_history(upload)
         data_source = f"本次手动上传：{upload.name}"
+    elif isinstance(st.session_state.get("v40_history_override"), pd.DataFrame):
+        df = validate_frame(st.session_state["v40_history_override"])
+        history_report = quality_report(df)
+        history_report.update({"source_mode": "manual_append_session", "source_filename": "V4.0手动追加"})
+        data_source = "V4.0 当前会话手动追加数据"
     else:
         df, history_report = load_repository_history(HISTORY_PATH)
 except Exception as exc:
@@ -135,8 +171,8 @@ st.caption(f"数据来源：{data_source}｜引擎版本：{ENGINE_VERSION}｜�
 if "v36_project_state" not in st.session_state:
     st.session_state["v36_project_state"] = new_project_state()
 
-page_overview, page_pick, page_stats, page_backtest, page_optimizer, page_joint, page_robust, page_ensemble, page_portfolio, page_models, page_data, page_review = st.tabs([
-    "系统总览", "智能选号", "历史统计", "回测中心", "单模型参数实验", "V3.7联合优化", "V3.8稳健研究", "模型集成", "组合优化", "模型管理", "数据管理", "选号复盘"
+page_overview, page_pick, page_stats, page_backtest, page_optimizer, page_joint, page_robust, page_ensemble, page_portfolio, page_models, page_data, page_review, page_v40 = st.tabs([
+    "系统总览", "智能选号", "历史统计", "回测中心", "单模型参数实验", "V3.7联合优化", "V3.8稳健研究", "模型集成", "组合优化", "模型管理", "数据管理", "选号复盘", "V4.0研究治理"
 ])
 
 with page_overview:
@@ -688,6 +724,18 @@ with page_robust:
                 )
                 st.session_state["v38_robust_result"] = _v38_result
                 _v38_meta = dict(_v38_result["metadata"])
+                _selection_fp = _v38_meta.get("retrospective_data_fingerprint_sha256")
+                if _selection_fp:
+                    _v40_event = v40_make_event("model_snapshot", _selection_fp, {
+                        "selected_config": _v38_result["selected_config"],
+                        "selection_data_fingerprint": _selection_fp,
+                        "selection_end_draw": _v38_meta.get("retrospective_validation_end_draw"),
+                        "research_experiment_id": _v38_meta.get("experiment_id"),
+                        "engine_version": _v38_meta.get("engine_version"),
+                        "predictive_advantage_status": _v38_meta.get("predictive_advantage_status"),
+                        "metadata": _v38_meta,
+                    })
+                    _v40_add_event(_v40_event)
                 _v38_meta["data_fingerprint"] = _v38_meta.get("full_data_fingerprint_sha256")
                 _v38_meta["holdout_evaluated"] = False
                 st.session_state["v36_project_state"] = add_experiment(
@@ -703,10 +751,23 @@ with page_robust:
                 st.error(f"V3.8稳健研究失败：{type(exc).__name__}: {exc}")
 
     _v38_result = st.session_state.get("v38_robust_result")
-    _v38_current_fingerprint = _hashlib.sha256(df.to_csv(index=False).encode("utf-8")).hexdigest()
+    _v38_selection_history = df[df["draw_no"] <= int(V38_RETROSPECTIVE_CUTOFF_DRAW)]
+    _v38_current_selection_fingerprint = (
+        v40_data_fingerprint(_v38_selection_history) if not _v38_selection_history.empty else ""
+    )
+    _v38_saved_selection_fingerprint = (
+        _v38_result.get("metadata", {}).get("retrospective_data_fingerprint_sha256")
+        if isinstance(_v38_result, dict) else None
+    )
+    # Freeze against the selection slice, not the ever-growing full history.
     _v38_result_matches_current = (
         isinstance(_v38_result, dict)
-        and _v38_result.get("metadata", {}).get("full_data_fingerprint_sha256") == _v38_current_fingerprint
+        and (
+            _v38_saved_selection_fingerprint == _v38_current_selection_fingerprint
+            if _v38_saved_selection_fingerprint
+            else _v38_result.get("metadata", {}).get("full_data_fingerprint_sha256")
+                 == _hashlib.sha256(df.to_csv(index=False).encode("utf-8")).hexdigest()
+        )
     )
     if isinstance(_v38_result, dict) and not _v38_result_matches_current:
         st.warning("当前手动历史数据与本次 V3.8 研究使用的数据版本不同。旧研究结果仅供归档查看，不会用于当前数据生成新的锁定号码。")
@@ -781,6 +842,13 @@ with page_robust:
                     "detail": _lock_detail,
                     "metadata": _lock_meta,
                 }
+                _lock_fp = _lock_meta.get("history_fingerprint_sha256")
+                if _lock_fp:
+                    _v40_event = v40_make_event("forward_lock", _lock_fp, {
+                        "metadata": _lock_meta,
+                        "detail_records": _lock_detail.to_dict(orient="records"),
+                    })
+                    _v40_add_event(_v40_event)
                 st.success(f"第{_lock_meta['target_draw']}期前瞻锁定记录已生成。请立即下载并在开奖前保存。")
             except Exception as exc:
                 st.error(f"生成前瞻锁定记录失败：{type(exc).__name__}: {exc}")
@@ -819,6 +887,8 @@ with page_robust:
                     key=f"v38_lock_meta_{_target_key}",
                 )
         _v38_scored_detail, _v38_scored_summary = evaluate_forward_locks(df, _v38_lock_map)
+        st.session_state["v40_scored_forward_detail"] = _v38_scored_detail
+        st.session_state["v40_scored_forward_summary"] = _v38_scored_summary
         if not _v38_scored_detail.empty:
             st.markdown("### 已导入开奖结果的前瞻锁定复盘")
             st.warning("系统确认目标期号在锁定时历史末期之后，但不能独立验证你是否在开奖前下载/保存了锁定文件。请保留锁定时间与原始文件，供审计。")
@@ -1020,6 +1090,160 @@ with page_data:
     st.dataframe(df.tail(20), hide_index=True, use_container_width=True)
     st.download_button("下载当前清洗后的历史数据", df.to_csv(index=False).encode("utf-8-sig"), "lotto645_clean_history.csv", "text/csv")
     st.download_button("下载空白数据模板", pd.DataFrame(columns=COLUMNS).to_csv(index=False).encode("utf-8-sig"), "lotto645_history_template.csv", "text/csv")
+
+with page_v40:
+    st.subheader("V4.0 研究治理与数据中心")
+    st.write("将模型研究、前瞻锁定、数据版本与实验事件纳入统一的可恢复档案。所有开奖数据仍仅接受手动导入。")
+
+    if isinstance(st.session_state.get("v40_history_override"), pd.DataFrame):
+        st.info("检测到当前会话中有手动追加记录。请下载完整 CSV 并提交到 GitHub，才能永久保存。")
+        st.download_button(
+            "下载当前完整历史 CSV",
+            df.to_csv(index=False).encode("utf-8-sig"),
+            "lotto645.csv", "text/csv", key="v40_current_history_download",
+        )
+
+    current_fp = v40_data_fingerprint(df)
+    selection_frame = df[df["draw_no"] <= int(V38_RETROSPECTIVE_CUTOFF_DRAW)]
+    selection_fp = v40_data_fingerprint(selection_frame) if not selection_frame.empty else ""
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("当前历史末期", int(quality["last_draw"]))
+    c2.metric("历史记录", int(quality["rows"]))
+    c3.metric("完整历史指纹", current_fp[:12] + "…")
+    c4.metric("冻结选型指纹", (selection_fp[:12] + "…") if selection_fp else "暂无")
+
+    st.markdown("### 1. 严格追加新期开奖")
+    st.caption("只允许追加下一期；重复相同期数会幂等忽略，冲突期号、跳号或不合法号码会被拒绝。")
+    with st.form("v40_append_draw_form"):
+        expected_draw = int(quality["last_draw"]) + 1
+        f1, f2 = st.columns(2)
+        with f1:
+            new_draw_no = st.number_input("新期号", min_value=expected_draw, max_value=expected_draw, value=expected_draw, step=1)
+        with f2:
+            new_draw_date = st.text_input("开奖日期（YYYY-MM-DD）", placeholder="2026-11-14")
+        ncols = st.columns(7)
+        new_numbers = []
+        for idx in range(6):
+            new_numbers.append(int(ncols[idx].number_input(f"主号 {idx+1}", min_value=1, max_value=45, value=idx + 1, key=f"v40_new_n{idx+1}")))
+        new_bonus = int(ncols[6].number_input("Bonus", min_value=1, max_value=45, value=7, key="v40_new_bonus"))
+        append_clicked = st.form_submit_button("校验并追加到当前会话", use_container_width=True)
+    if append_clicked:
+        try:
+            updated_history, append_status = v40_append_draw(df, int(new_draw_no), new_draw_date, new_numbers, new_bonus)
+            st.session_state["v40_history_override"] = updated_history
+            appended_fp = v40_data_fingerprint(updated_history)
+            _v40_add_event(v40_make_event("draw_appended", appended_fp, {
+                "draw_no": int(new_draw_no), "draw_date": new_draw_date,
+                "numbers": sorted(new_numbers), "bonus": new_bonus,
+                "append_status": append_status, "history_rows": len(updated_history),
+            }))
+            st.success(f"第{new_draw_no}期追加成功。请下载完整 CSV 并提交到 GitHub，作为永久历史数据。")
+            st.download_button(
+                "下载追加后的完整历史 CSV",
+                updated_history.to_csv(index=False).encode("utf-8-sig"),
+                "lotto645.csv", "text/csv", key=f"v40_append_download_{new_draw_no}",
+            )
+            st.rerun()
+        except Exception as exc:
+            st.error(f"追加失败：{type(exc).__name__}: {exc}")
+
+    st.markdown("### 2. 实验档案导出与恢复")
+    st.caption("实验事件档案包含模型快照、手动追加事件与前瞻锁定记录，不包含 GitHub Token 或 Streamlit Secret。")
+    events_now = list(st.session_state.get("v40_events", []))
+    st.download_button(
+        "下载 V4.0 实验事件档案 JSON", export_event_archive(events_now),
+        "lotto645_v40_event_archive.json", "application/json", use_container_width=True,
+    )
+    archive_upload = st.file_uploader("恢复 V4.0 实验事件档案 JSON", type=["json"], key="v40_archive_import")
+    if archive_upload is not None and st.button("验证并恢复事件档案", key="v40_restore_archive"):
+        try:
+            imported = import_event_archive(archive_upload.getvalue())
+            existing_ids = {item["event_id"] for item in events_now}
+            merged = events_now + [item for item in imported if item["event_id"] not in existing_ids]
+            restored_locks = events_to_forward_locks(merged)
+            current_locks = dict(st.session_state.get("v38_forward_locks", {}))
+            for draw_key, lock in restored_locks.items():
+                if draw_key in current_locks:
+                    existing = current_locks[draw_key]["metadata"]
+                    incoming = lock["metadata"]
+                    if existing.get("history_fingerprint_sha256") != incoming.get("history_fingerprint_sha256"):
+                        raise ValueError(f"第{draw_key}期已存在另一份锁定记录，拒绝覆盖。")
+                else:
+                    current_locks[draw_key] = lock
+            st.session_state["v40_events"] = merged
+            st.session_state["v38_forward_locks"] = current_locks
+            st.success(f"已恢复 {len(imported)} 条事件，识别到 {len(restored_locks)} 期前瞻锁定。")
+            st.rerun()
+        except Exception as exc:
+            st.error(f"事件档案恢复失败：{type(exc).__name__}: {exc}")
+
+    st.markdown("### 3. 冻结模型快照与下一期锁定")
+    snapshot_event = latest_model_snapshot(events_now)
+    if snapshot_event:
+        snapshot = snapshot_event["payload"]
+        frozen_config = snapshot["selected_config"]
+        st.json({
+            "模型": frozen_config.get("model_name"), "参数": frozen_config.get("params"),
+            "选型结束期": snapshot.get("selection_end_draw"),
+            "选型数据指纹": snapshot.get("selection_data_fingerprint"),
+            "研究ID": snapshot.get("research_experiment_id"),
+            "预测证据状态": snapshot.get("predictive_advantage_status"),
+        })
+        lock_target = int(quality["last_draw"]) + 1
+        already_locked = str(lock_target) in st.session_state.get("v38_forward_locks", {})
+        if st.button(f"使用冻结快照锁定第{lock_target}期", disabled=already_locked, key="v40_lock_from_snapshot", use_container_width=True):
+            try:
+                from robust_optimizer import build_forward_lock
+                lock_detail, lock_meta = build_forward_lock(df, frozen_config, tickets_per_draw=10, seed_groups=3, seed=2040)
+                st.session_state.setdefault("v38_forward_locks", {})[str(lock_target)] = {"detail": lock_detail, "metadata": lock_meta}
+                _v40_add_event(v40_make_event("forward_lock", lock_meta["history_fingerprint_sha256"], {
+                    "metadata": lock_meta, "detail_records": lock_detail.to_dict(orient="records"),
+                }))
+                st.success(f"第{lock_target}期模型与随机基准号码已锁定；请立即保存原始锁定文件。")
+                st.rerun()
+            except Exception as exc:
+                st.error(f"锁定失败：{type(exc).__name__}: {exc}")
+    else:
+        st.warning("尚无可恢复的 V4.0 冻结模型快照。请先在 V3.8 稳健研究页完成一次研究，或导入以前保存的 V4.0 事件档案。")
+
+    st.markdown("### 4. 前瞻效果与模型晋升审查")
+    scored_forward = st.session_state.get("v40_scored_forward_detail")
+    if isinstance(scored_forward, pd.DataFrame) and not scored_forward.empty:
+        candidate_names = [name for name in scored_forward["策略"].dropna().unique().tolist() if name != "均匀随机基准"]
+        all_reports, gates = [], []
+        for model_idx, model_name in enumerate(candidate_names):
+            report, gate = v40_evaluate_forward_pairs(scored_forward, model_name, repetitions=5000, seed=2040 + model_idx * 17)
+            if not report.empty:
+                report.insert(0, "模型", model_name)
+                all_reports.append(report)
+            gates.append({"模型": model_name, **gate})
+        if all_reports:
+            st.dataframe(pd.concat(all_reports, ignore_index=True), hide_index=True, use_container_width=True)
+        if gates:
+            st.dataframe(pd.DataFrame(gates), hide_index=True, use_container_width=True)
+        st.info("正式晋升门槛：至少100个前瞻开奖期；三个主要指标点估计均高于随机；区块Bootstrap 95%CI下限均高于0；Holm校正p值均小于0.05。")
+    else:
+        st.caption("当前没有可评价的开奖前锁定复盘记录。")
+
+    st.markdown("### 5. 可选 GitHub 持久化（只保存研究事件）")
+    st.caption("不配置 Token 时，可使用 JSON 导出与恢复。配置后仅写入独立 research-data 分支，不改动 main 和开奖记录。")
+    if st.button("检查并恢复 GitHub 研究档案", key="v40_remote_load"):
+        try:
+            token = st.secrets.get("GITHUB_RESEARCH_TOKEN", "")
+            if not token:
+                st.info("尚未配置 GITHUB_RESEARCH_TOKEN。可以继续使用 JSON 导出/恢复。")
+            else:
+                remote_events = GitHubEventStore("Frogbornwater/korea-lotto645-analyzer", str(token), branch="research-data").load_events()
+                merged_ids = {item["event_id"] for item in events_now}
+                st.session_state["v40_events"] = events_now + [item for item in remote_events if item["event_id"] not in merged_ids]
+                restored = events_to_forward_locks(st.session_state["v40_events"])
+                st.session_state["v38_forward_locks"] = {**st.session_state.get("v38_forward_locks", {}), **restored}
+                st.success(f"已从 research-data 分支恢复 {len(remote_events)} 条研究事件。")
+                st.rerun()
+        except EventStoreError as exc:
+            st.error(f"GitHub研究档案读取失败：{exc}")
+        except Exception as exc:
+            st.error(f"GitHub研究档案读取失败：{type(exc).__name__}: {exc}")
 
 with page_review:
     st.subheader("自选号码历史复盘")

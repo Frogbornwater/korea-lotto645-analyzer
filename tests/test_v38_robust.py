@@ -43,7 +43,7 @@ def synthetic_history(draws: int = 180, seed: int = 4408) -> pd.DataFrame:
 
 class V38RobustResearchTests(unittest.TestCase):
     def test_engine_version_updated(self):
-        self.assertEqual(ENGINE_VERSION, "3.8.0-robust")
+        self.assertEqual(ENGINE_VERSION, "4.0.0-governed")
 
     def test_default_run_configuration_matches_real_data_benchmark(self):
         params = inspect.signature(run_robust_research).parameters
