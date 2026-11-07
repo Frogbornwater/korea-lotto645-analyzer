@@ -8,7 +8,7 @@ from __future__ import annotations
 
 
 def main() -> int:
-    print("Automatic draw-data synchronization is disabled in Lotto 6/45 V3.7.")
+    print("Automatic draw-data synchronization is disabled in Lotto 6/45 V4.0.")
     print("Please import a historical CSV or Excel file manually in the application.")
     return 0
 

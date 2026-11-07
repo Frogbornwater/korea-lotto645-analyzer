@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
-"""Model registry and version metadata for Lotto 6/45 V3.8."""
+"""Model registry and version metadata for Lotto 6/45 V4.0."""
 from __future__ import annotations
 
-ENGINE_VERSION = "3.8.0-robust"
+ENGINE_VERSION = "4.0.0-governed"
 MODEL_DEFINITIONS = [
     {
         "name": "近期频率模型",
