@@ -339,3 +339,70 @@ def generate_tickets(
     if len(tickets) != int(count):
         raise RuntimeError("V5未能生成足够的不同号码组合。")
     return tickets
+
+
+def build_v50_forward_lock(
+    history: pd.DataFrame,
+    prediction: dict[str, Any],
+    tickets_per_group: int = 10,
+    seed: int = 5050,
+) -> tuple[pd.DataFrame, dict[str, Any]]:
+    """Create a timestamped, paired V5-vs-uniform pre-draw lock."""
+    clean = validate_frame(history).reset_index(drop=True)
+    if clean.empty:
+        raise ValueError("没有可用于前瞻锁定的历史数据。")
+    draws = clean["draw_no"].to_numpy(dtype=np.int64)
+    if np.any(np.diff(draws) != 1):
+        raise ValueError("历史期号存在缺失，不能建立V5前瞻锁定。")
+    if int(prediction.get("history_last_draw", -1)) != int(draws[-1]):
+        raise ValueError("预测所用历史末期与当前数据不一致，拒绝锁定。")
+    if prediction.get("engine_version") != V50_ENGINE_VERSION:
+        raise ValueError("预测引擎版本不匹配，拒绝锁定。")
+    if not 1 <= int(tickets_per_group) <= 20:
+        raise ValueError("每个实验组的注数必须为1—20。")
+
+    probs_frame = prediction["number_probabilities"].sort_values("号码")
+    probs = probs_frame["预测入选概率"].to_numpy(dtype=float)
+    pair = np.asarray(prediction["pair_scores"], dtype=float)
+    target_draw = int(draws[-1]) + 1
+    model_seed = int(np.random.SeedSequence([int(seed), target_draw, 5001]).generate_state(1)[0])
+    random_seed = int(np.random.SeedSequence([int(seed), target_draw, 7001]).generate_state(1)[0])
+    model_tickets = generate_tickets(probs, pair, int(tickets_per_group), model_seed, 0.5)
+    random_tickets = generate_tickets(np.full(45, BASE_RATE), None, int(tickets_per_group), random_seed, 0.0)
+    created = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    history_hash = hashlib.sha256(clean.to_csv(index=False).encode("utf-8")).hexdigest()
+    probability_lookup = {int(row["号码"]): float(row["预测入选概率"]) for _, row in probs_frame.iterrows()}
+    records: list[dict[str, Any]] = []
+    for group, tickets in ((MODEL_NAME, model_tickets), ("均匀随机对照", random_tickets)):
+        for ticket_no, ticket in enumerate(tickets, 1):
+            record = {
+                "目标期号": target_draw,
+                "锁定时间UTC": created,
+                "策略": group,
+                "注序": ticket_no,
+                "号码": "-".join(f"{x:02d}" for x in ticket),
+                "V5边际概率之和": float(sum(probability_lookup[x] for x in ticket)) if group == MODEL_NAME else None,
+            }
+            record.update({f"n{i}": number for i, number in enumerate(ticket, 1)})
+            records.append(record)
+    detail = pd.DataFrame(records)
+    metadata = {
+        "engine_version": V50_ENGINE_VERSION,
+        "lock_type": "v50_pre_draw_paired_lock",
+        "created_at_utc": created,
+        "target_draw": target_draw,
+        "history_first_draw": int(draws[0]),
+        "history_last_draw": int(draws[-1]),
+        "history_rows": int(len(clean)),
+        "history_fingerprint_sha256": history_hash,
+        "training_window": int(prediction["training_window"]),
+        "ridge_alpha": float(prediction["ridge_alpha"]),
+        "min_history": int(prediction["min_history"]),
+        "tickets_per_group": int(tickets_per_group),
+        "model_seed": model_seed,
+        "random_seed": random_seed,
+        "paired_control": "均匀随机对照",
+        "policy": "预测在目标期开奖结果导入前生成并保存；开奖后不得重写",
+        "warning": "该锁定只证明预测时间和数据版本；是否优于随机需在后续开奖后按预先规定的指标检验。",
+    }
+    return detail, metadata
