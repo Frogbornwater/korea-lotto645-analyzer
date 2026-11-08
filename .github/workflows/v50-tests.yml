@@ -1,0 +1,29 @@
+name: V5.0 predictive engine tests
+
+on:
+  push:
+    branches: ["v5.0-predictive-engine"]
+  pull_request:
+    branches: ["main"]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Compile all Python modules
+        run: python -m compileall -q .
+      - name: Run test suite
+        run: python -m unittest discover -s tests -v
+      - name: Run retrospective V5 real-history benchmark
+        run: python scripts/v50_real_data_benchmark.py
+      - name: Run V5 feature ablation screen
+        run: python scripts/v50_feature_ablation.py
+      - name: Run V5 robustness and placebo diagnostics
+        run: python scripts/v50_robustness_placebo.py

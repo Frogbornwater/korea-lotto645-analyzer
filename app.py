@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Lotto 6/45 V4.0 governed research console - offline/manual-data application."""
+"""Lotto 6/45 V5.0 predictive research console with V4.0 governance - offline/manual-data application."""
 from __future__ import annotations
 
 import io
@@ -17,7 +17,7 @@ sys.path.insert(0, _APP_ROOT)
 for _module_name in (
     "backtest_engine", "joint_optimizer", "robust_optimizer", "parameter_optimizer",
     "portfolio_optimizer", "lotto_core", "model_registry", "model_management",
-    "experiment_export", "data_manager", "v40_governance", "v40_store",
+    "experiment_export", "data_manager", "v40_governance", "v40_store", "v50_predictive_engine", "v50_backtest",
 ):
     sys.modules.pop(_module_name, None)
 
@@ -60,6 +60,8 @@ from v40_governance import (
     make_event as v40_make_event,
     evaluate_forward_pairs as v40_evaluate_forward_pairs,
 )
+from v50_predictive_engine import fit_predict_next as v50_fit_predict_next, generate_tickets as v50_generate_tickets, build_v50_forward_lock
+from v50_backtest import run_v50_walk_forward
 from v40_store import (
     EventStoreError, GitHubEventStore, export_event_archive,
     import_event_archive, latest_model_snapshot, events_to_forward_locks,
@@ -85,9 +87,9 @@ try:
 except (FileNotFoundError, json.JSONDecodeError, OSError):
     _EXPERIMENT_LEDGER = {"experiments": [], "known_reviewed_ranges": []}
 
-st.set_page_config(page_title="Lotto 6/45 V4.0 · 研究治理平台", page_icon="🎯", layout="wide")
-st.title("🎯 韩国 Lotto 6/45 · V4.0 研究治理平台")
-st.caption("手动历史数据导入｜多模型分析｜可复现滚动回测｜研究与娱乐用途")
+st.set_page_config(page_title="Lotto 6/45 V5.0 · 预测研究平台", page_icon="🎯", layout="wide")
+st.title("🎯 韩国 Lotto 6/45 · V5.0 预测研究平台")
+st.caption("V5联合概率预测｜V4研究治理兼容｜手动历史数据导入｜离线滚动回测")
 
 if "v40_events" not in st.session_state:
     st.session_state["v40_events"] = []
@@ -166,7 +168,7 @@ m1.metric("有效历史记录", f"{quality['rows']:,}期")
 m2.metric("最新期号", f"第{quality['last_draw']}期")
 m3.metric("最新开奖日期", str(last["date"] or "未提供"))
 m4.metric("历史序列", "从第1期连续" if quality["sequence_complete"] else f"缺{len(quality['missing_draws'])}期")
-st.caption(f"数据来源：{data_source}｜引擎版本：{ENGINE_VERSION}｜数据仅由用户手动提供")
+st.caption(f"数据来源：{data_source}｜治理底座版本：{ENGINE_VERSION}｜数据仅由用户手动提供")
 
 if "v36_project_state" not in st.session_state:
     st.session_state["v36_project_state"] = new_project_state()
@@ -1090,6 +1092,129 @@ with page_data:
     st.dataframe(df.tail(20), hide_index=True, use_container_width=True)
     st.download_button("下载当前清洗后的历史数据", df.to_csv(index=False).encode("utf-8-sig"), "lotto645_clean_history.csv", "text/csv")
     st.download_button("下载空白数据模板", pd.DataFrame(columns=COLUMNS).to_csv(index=False).encode("utf-8-sig"), "lotto645_history_template.csv", "text/csv")
+
+with page_v50:
+    st.subheader("V5.0 联合概率预测实验")
+    st.write(
+        "V5.0采用严格时间顺序的号码特征、正则化逻辑概率模型、号码共现收缩与固定六号码概率校准。"
+        "此页面的历史回测只用于研究筛查；真正的前瞻证据必须在开奖前锁定。"
+    )
+    st.warning(
+        "为避免重复使用已审阅数据，V5.0历史回测默认只使用第1—1088期。"
+        "第1089—1248期已在V3.7研究中审阅，不会被标记为新独立测试。"
+    )
+    safe_v50 = df[df["draw_no"] <= 1088].copy().reset_index(drop=True)
+    c1, c2, c3 = st.columns(3)
+    c1.metric("安全回溯末期", int(safe_v50["draw_no"].max()) if not safe_v50.empty else "无")
+    c2.metric("安全回溯记录", len(safe_v50))
+    c3.metric("模型", "V5联合概率模型")
+    with st.expander("V5.0模型设置", expanded=True):
+        v50_window = st.selectbox("训练窗口", [300, 400, 500, 700, 900], index=2, key="v50_window")
+        v50_alpha = st.select_slider("Ridge正则化强度", options=[0.1, 0.3, 1.0, 3.0, 10.0], value=1.0, key="v50_alpha")
+        v50_test_draws = st.select_slider("历史回测期数（截至1088期）", options=[20, 30, 50, 80, 100], value=50, key="v50_test_draws")
+        v50_tickets = st.select_slider("每期每组注数", options=[5, 10, 15, 20], value=10, key="v50_tickets")
+    if st.button("运行 V5.0 安全区间滚动回测", type="primary", use_container_width=True, key="v50_run_backtest"):
+        if len(safe_v50) < 300:
+            st.error("截至第1088期的安全回溯数据不足300期。")
+        else:
+            progress = st.progress(0, text="准备V5特征缓存…")
+            status = st.empty()
+            try:
+                def _v50_progress(done, total):
+                    progress.progress(min(1.0, done / max(total, 1)), text=f"V5滚动评估：{done}/{total}")
+                    status.caption("严格使用目标期开奖前可见的历史数据")
+                result = run_v50_walk_forward(
+                    safe_v50, test_draws=int(v50_test_draws),
+                    training_window=int(v50_window), min_history=180,
+                    ridge_alpha=float(v50_alpha), tickets_per_draw=int(v50_tickets),
+                    seed=5026, bootstrap_reps=2000, progress_callback=_v50_progress,
+                )
+                st.session_state["v50_backtest_result"] = result
+                st.success(f"V5.0回测完成：{result['test_draws']}期，耗时{result['elapsed_seconds']:.1f}秒。")
+            except Exception as exc:
+                st.error(f"V5.0回测失败：{type(exc).__name__}: {exc}")
+    result = st.session_state.get("v50_backtest_result")
+    if result:
+        st.markdown("### V5.0完整模型 / V5频率精简模型 / V4冻结模型 / 随机四方对照")
+        st.caption(f"回测范围：第{result['test_start_draw']}—{result['test_end_draw']}期；状态：历史回溯，不是前瞻证据。")
+        st.dataframe(result["summary"].round(5), hide_index=True, use_container_width=True)
+        st.download_button(
+            "下载V5.0逐期回测明细CSV",
+            result["detail"].to_csv(index=False).encode("utf-8-sig"),
+            "lotto645_v50_walk_forward_detail.csv", "text/csv", key="v50_detail_download",
+        )
+        st.download_button(
+            "下载V5.0回测摘要CSV",
+            result["summary"].to_csv(index=False).encode("utf-8-sig"),
+            "lotto645_v50_walk_forward_summary.csv", "text/csv", key="v50_summary_download",
+        )
+        st.json({
+            "引擎": result["engine_version"],
+            "训练窗口": result["training_window"],
+            "Ridge alpha": result["ridge_alpha"],
+            "数据指纹": result["data_fingerprint_sha256"],
+            "证据状态": result["evidence_status"],
+        })
+    st.markdown("### 下一期V5概率预测与开奖前锁定")
+    st.caption("使用当前全部手动历史数据生成下一期研究候选；不会覆盖V4.0冻结快照。")
+    if st.button("生成并锁定V5下一期预测（含随机对照）", key="v50_generate_next", use_container_width=True):
+        try:
+            prediction = v50_fit_predict_next(
+                df, training_window=min(int(v50_window), 1000),
+                min_history=180, ridge_alpha=float(v50_alpha),
+            )
+            probs = prediction["number_probabilities"].sort_values("号码")["预测入选概率"].to_numpy()
+            lock_detail, lock_metadata = build_v50_forward_lock(df, prediction, tickets_per_group=10, seed=5050)
+            tickets = [
+                [int(lock_detail.iloc[row][f"n{j}"]) for j in range(1, 7)]
+                for row in range(10)
+            ]
+            st.session_state["v50_next_prediction"] = prediction
+            st.session_state["v50_next_tickets"] = tickets
+            st.session_state["v50_forward_lock_detail"] = lock_detail
+            st.session_state["v50_forward_lock_metadata"] = lock_metadata
+        except Exception as exc:
+            st.error(f"V5下一期预测失败：{type(exc).__name__}: {exc}")
+    prediction = st.session_state.get("v50_next_prediction")
+    tickets = st.session_state.get("v50_next_tickets")
+    if prediction and tickets:
+        st.write({
+            "目标期号": prediction["target_draw"],
+            "训练结束期": prediction["history_last_draw"],
+            "模型": prediction["model_name"],
+            "概率总和": round(prediction["probability_sum"], 6),
+            "说明": prediction["interpretation"],
+        })
+        ticket_frame = pd.DataFrame([
+            {"注序": idx, "号码": " - ".join(f"{n:02d}" for n in ticket), **{f"n{j+1}": n for j, n in enumerate(ticket)}}
+            for idx, ticket in enumerate(tickets, 1)
+        ])
+        st.dataframe(ticket_frame, hide_index=True, use_container_width=True)
+        st.dataframe(prediction["number_probabilities"].head(15).round(5), hide_index=True, use_container_width=True)
+        st.download_button(
+            "下载V5下一期候选号码CSV",
+            ticket_frame.to_csv(index=False).encode("utf-8-sig"),
+            f"lotto645_v50_draw_{prediction['target_draw']}_candidates.csv",
+            "text/csv", key="v50_next_download",
+        )
+        lock_detail = st.session_state.get("v50_forward_lock_detail")
+        lock_metadata = st.session_state.get("v50_forward_lock_metadata")
+        if isinstance(lock_detail, pd.DataFrame) and lock_metadata:
+            st.markdown("#### V5完整模型 / V5频率精简模型 / V4冻结模型 / 随机对照锁定记录")
+            st.dataframe(lock_detail, hide_index=True, use_container_width=True)
+            st.download_button(
+                "下载V5前瞻锁定CSV（含随机对照）",
+                lock_detail.to_csv(index=False).encode("utf-8-sig"),
+                f"lotto645_v50_lock_draw_{prediction['target_draw']}.csv",
+                "text/csv", key="v50_lock_csv_download",
+            )
+            st.download_button(
+                "下载V5前瞻锁定元数据JSON",
+                json.dumps(lock_metadata, ensure_ascii=False, indent=2),
+                f"lotto645_v50_lock_draw_{prediction['target_draw']}.json",
+                "application/json", key="v50_lock_json_download",
+            )
+            st.warning("必须在目标期开奖前下载并保存CSV与JSON。新会话不会自动保留锁定；请同时备份两个文件。")
 
 with page_v40:
     st.subheader("V4.0 研究治理与数据中心")
