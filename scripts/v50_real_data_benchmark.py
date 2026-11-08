@@ -2,12 +2,14 @@
 """Reproducible V5.0 real-history screening benchmark (retrospective only)."""
 from pathlib import Path
 import json
+import sys
 
 import pandas as pd
 
-from v50_backtest import run_v50_walk_forward
-
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+
+from v50_backtest import run_v50_walk_forward
 history = pd.read_csv(ROOT / "data" / "lotto645.csv")
 history = history.loc[history["draw_no"] <= 1088].copy().reset_index(drop=True)
 result = run_v50_walk_forward(
