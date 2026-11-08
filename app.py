@@ -60,7 +60,7 @@ from v40_governance import (
     make_event as v40_make_event,
     evaluate_forward_pairs as v40_evaluate_forward_pairs,
 )
-from v50_predictive_engine import fit_predict_next as v50_fit_predict_next, generate_tickets as v50_generate_tickets\nfrom v50_backtest import run_v50_walk_forward\nfrom v40_store import (
+from v50_predictive_engine import fit_predict_next as v50_fit_predict_next, generate_tickets as v50_generate_tickets, build_v50_forward_lock\nfrom v50_backtest import run_v50_walk_forward\nfrom v40_store import (
     EventStoreError, GitHubEventStore, export_event_archive,
     import_event_archive, latest_model_snapshot, events_to_forward_locks,
 )
@@ -1153,20 +1153,24 @@ with page_v50:
             "数据指纹": result["data_fingerprint_sha256"],
             "证据状态": result["evidence_status"],
         })
-    st.markdown("### 下一期V5概率预测")
+    st.markdown("### 下一期V5概率预测与开奖前锁定")
     st.caption("使用当前全部手动历史数据生成下一期研究候选；不会覆盖V4.0冻结快照。")
-    if st.button("生成V5下一期预测与10注候选", key="v50_generate_next", use_container_width=True):
+    if st.button("生成并锁定V5下一期预测（含随机对照）", key="v50_generate_next", use_container_width=True):
         try:
             prediction = v50_fit_predict_next(
                 df, training_window=min(int(v50_window), 1000),
                 min_history=180, ridge_alpha=float(v50_alpha),
             )
             probs = prediction["number_probabilities"].sort_values("号码")["预测入选概率"].to_numpy()
-            tickets = v50_generate_tickets(
-                probs, prediction["pair_scores"], count=10, seed=5050, pair_strength=0.5,
-            )
+            lock_detail, lock_metadata = build_v50_forward_lock(df, prediction, tickets_per_group=10, seed=5050)
+            tickets = [
+                [int(lock_detail.iloc[row][f"n{j}"]) for j in range(1, 7)]
+                for row in range(10)
+            ]
             st.session_state["v50_next_prediction"] = prediction
             st.session_state["v50_next_tickets"] = tickets
+            st.session_state["v50_forward_lock_detail"] = lock_detail
+            st.session_state["v50_forward_lock_metadata"] = lock_metadata
         except Exception as exc:
             st.error(f"V5下一期预测失败：{type(exc).__name__}: {exc}")
     prediction = st.session_state.get("v50_next_prediction")
@@ -1191,7 +1195,24 @@ with page_v50:
             f"lotto645_v50_draw_{prediction['target_draw']}_candidates.csv",
             "text/csv", key="v50_next_download",
         )
-        st.warning("正式前瞻验证必须在开奖前锁定预测文件、数据指纹、参数和时间戳。当前界面生成候选号码不自动构成V4.0治理事件。")
+        lock_detail = st.session_state.get("v50_forward_lock_detail")
+        lock_metadata = st.session_state.get("v50_forward_lock_metadata")
+        if isinstance(lock_detail, pd.DataFrame) and lock_metadata:
+            st.markdown("#### V5 / 随机对照锁定记录")
+            st.dataframe(lock_detail, hide_index=True, use_container_width=True)
+            st.download_button(
+                "下载V5前瞻锁定CSV（含随机对照）",
+                lock_detail.to_csv(index=False).encode("utf-8-sig"),
+                f"lotto645_v50_lock_draw_{prediction['target_draw']}.csv",
+                "text/csv", key="v50_lock_csv_download",
+            )
+            st.download_button(
+                "下载V5前瞻锁定元数据JSON",
+                json.dumps(lock_metadata, ensure_ascii=False, indent=2),
+                f"lotto645_v50_lock_draw_{prediction['target_draw']}.json",
+                "application/json", key="v50_lock_json_download",
+            )
+            st.warning("必须在目标期开奖前下载并保存CSV与JSON。新会话不会自动保留锁定；请同时备份两个文件。")
 
 with page_v40:
     st.subheader("V4.0 研究治理与数据中心")
