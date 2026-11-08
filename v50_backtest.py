@@ -66,6 +66,7 @@ def run_v50_walk_forward(
     seed: int = 5026,
     bootstrap_reps: int = 2000,
     progress_callback: Callable[[int, int], None] | None = None,
+    feature_exclusions: tuple[str, ...] = (),
 ) -> dict[str, Any]:
     """Evaluate one-step-ahead predictions, training each target from past only."""
     started = time.perf_counter()
@@ -99,7 +100,7 @@ def run_v50_walk_forward(
     rows: list[dict[str, Any]] = []
     for target_idx in range(start_idx, n):
         probabilities, pair_scores, diagnostics = _fit_from_feature_cache(
-            matrix, cache, target_idx, training_window, ridge_alpha
+            matrix, cache, target_idx, training_window, ridge_alpha, feature_exclusions
         )
         target_draw = int(draws[target_idx])
         actual = set(int(x) for x in matrix[target_idx])
@@ -216,6 +217,7 @@ def run_v50_walk_forward(
         "training_window": training_window,
         "min_history": min_history,
         "ridge_alpha": float(ridge_alpha),
+        "feature_exclusions": list(feature_exclusions),
         "tickets_per_draw": tickets_per_draw,
         "seed": int(seed),
         "data_fingerprint_sha256": fingerprint,
