@@ -13,7 +13,7 @@ import pandas as pd
 from lotto_core import NUMBER_COLS, validate_frame
 from v50_predictive_engine import (
     MODEL_NAME, V50_ENGINE_VERSION, _fit_from_feature_cache,
-    build_number_features, generate_tickets,
+    build_number_features, generate_tickets, _calibrate_to_six,
 )
 
 
@@ -28,6 +28,13 @@ def _score_ticket_batch(tickets: list[list[int]], actual: set[int]) -> dict[str,
         "best_hits": float(hits.max()),
         "total_hits": float(hits.sum()),
     }
+
+
+def _v4_long_frequency_probabilities(past: np.ndarray, long_prior: float = 174.941214) -> np.ndarray:
+    counts = np.bincount(np.asarray(past, dtype=np.int16).reshape(-1), minlength=46)[1:46].astype(float)
+    raw = (counts + float(long_prior) * (6.0 / 45.0)) / (len(past) + float(long_prior))
+    # Calibrate the legacy relative-frequency scores to a six-inclusion probability vector.
+    return _calibrate_to_six(np.log(np.clip(raw, 1e-9, 1.0 - 1e-9) / np.clip(1.0 - raw, 1e-9, 1.0)))
 
 
 def _probability_scores(probabilities: np.ndarray, actual: set[int]) -> tuple[float, float]:
@@ -100,32 +107,46 @@ def run_v50_walk_forward(
         model_tickets = generate_tickets(
             probabilities, pair_scores, tickets_per_draw, target_seed, pair_strength=0.5
         )
+        v4_probabilities = _v4_long_frequency_probabilities(matrix[:target_idx], 174.941214)
+        v4_tickets = generate_tickets(
+            v4_probabilities, None, tickets_per_draw, target_seed ^ 0x4F4F, pair_strength=0.0
+        )
+        random_probabilities = np.full(45, 6.0 / 45.0)
         random_tickets = generate_tickets(
-            np.full(45, 6.0 / 45.0), None, tickets_per_draw,
+            random_probabilities, None, tickets_per_draw,
             target_seed ^ 0x5A17, pair_strength=0.0
         )
         model_metrics = _score_ticket_batch(model_tickets, actual)
+        v4_metrics = _score_ticket_batch(v4_tickets, actual)
         random_metrics = _score_ticket_batch(random_tickets, actual)
         brier, log_loss = _probability_scores(probabilities, actual)
-        random_brier, random_log_loss = _probability_scores(np.full(45, 6.0 / 45.0), actual)
+        v4_brier, v4_log_loss = _probability_scores(v4_probabilities, actual)
+        random_brier, random_log_loss = _probability_scores(random_probabilities, actual)
         row: dict[str, Any] = {
             "目标期号": target_draw,
             "训练结束期": int(draws[target_idx - 1]),
             "训练期数": int(diagnostics["training_draws"]),
             "V5_Brier": brier,
             "V5_LogLoss": log_loss,
+            "V4_Brier": v4_brier,
+            "V4_LogLoss": v4_log_loss,
             "随机_Brier": random_brier,
             "随机_LogLoss": random_log_loss,
             "V5_概率和": float(probabilities.sum()),
+            "V4_概率和": float(v4_probabilities.sum()),
+            "V4_号码列表": "|".join(str(x) for x in v4_tickets),
             "V5_号码列表": "|".join(str(x) for x in model_tickets),
             "随机_号码列表": "|".join(str(x) for x in random_tickets),
         }
         for key, value in model_metrics.items():
             row[f"V5_{key}"] = value
+        for key, value in v4_metrics.items():
+            row[f"V4_{key}"] = value
         for key, value in random_metrics.items():
             row[f"随机_{key}"] = value
         for key in ("mean_hits", "ticket_3plus", "ticket_4plus", "batch_3plus", "batch_4plus", "best_hits"):
             row[f"差值_{key}"] = model_metrics[key] - random_metrics[key]
+            row[f"差值_V5_vs_V4_{key}"] = model_metrics[key] - v4_metrics[key]
         rows.append(row)
         if progress_callback:
             progress_callback(target_idx - start_idx + 1, n - start_idx)
@@ -146,8 +167,10 @@ def run_v50_walk_forward(
         summary_rows.append({
             "指标": label,
             "V5平均": float(detail[f"V5_{key}"].mean()),
+            "V4冻结模型平均": float(detail[f"V4_{key}"].mean()),
             "随机基准平均": float(detail[f"随机_{key}"].mean()),
             "差值": float(diffs.mean()),
+            "V5_vs_V4差值": float(detail[f"差值_V5_vs_V4_{key}"].mean()),
             "差值95%CI下限": low,
             "差值95%CI上限": high,
             "V5领先期数": int(np.sum(diffs > 0)),
@@ -156,15 +179,19 @@ def run_v50_walk_forward(
         })
     for metric, label in (("Brier", "概率Brier分数"), ("LogLoss", "概率Log Loss")):
         v5_values = detail[f"V5_{metric}"].to_numpy(dtype=float)
+        v4_values = detail[f"V4_{metric}"].to_numpy(dtype=float)
         random_values = detail[f"随机_{metric}"].to_numpy(dtype=float)
-        # Proper scores are lower-is-better; positive delta means V5 is better.
+        # Proper scores are lower-is-better; positive deltas mean V5 is better.
         improvement = random_values - v5_values
+        v4_improvement = v4_values - v5_values
         low, high = _bootstrap_mean_ci(improvement, bootstrap_reps, seed + 911 + len(summary_rows))
         summary_rows.append({
             "指标": label,
             "V5平均": float(v5_values.mean()),
+            "V4冻结模型平均": float(v4_values.mean()),
             "随机基准平均": float(random_values.mean()),
             "差值": float(improvement.mean()),
+            "V5_vs_V4差值": float(v4_improvement.mean()),
             "差值95%CI下限": low,
             "差值95%CI上限": high,
             "V5领先期数": int(np.sum(improvement > 0)),
