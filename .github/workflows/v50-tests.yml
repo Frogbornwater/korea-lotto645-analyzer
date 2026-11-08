@@ -25,3 +25,5 @@ jobs:
         run: python scripts/v50_real_data_benchmark.py
       - name: Run V5 feature ablation screen
         run: python scripts/v50_feature_ablation.py
+      - name: Run V5 robustness and placebo diagnostics
+        run: python scripts/v50_robustness_placebo.py
