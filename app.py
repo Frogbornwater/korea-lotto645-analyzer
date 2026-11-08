@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Lotto 6/45 V4.0 governed research console - offline/manual-data application."""
+"""Lotto 6/45 V5.0 predictive research console with V4.0 governance - offline/manual-data application."""
 from __future__ import annotations
 
 import io
@@ -87,9 +87,9 @@ try:
 except (FileNotFoundError, json.JSONDecodeError, OSError):
     _EXPERIMENT_LEDGER = {"experiments": [], "known_reviewed_ranges": []}
 
-st.set_page_config(page_title="Lotto 6/45 V4.0 · 研究治理平台", page_icon="🎯", layout="wide")
-st.title("🎯 韩国 Lotto 6/45 · V4.0 研究治理平台")
-st.caption("手动历史数据导入｜多模型分析｜可复现滚动回测｜研究与娱乐用途")
+st.set_page_config(page_title="Lotto 6/45 V5.0 · 预测研究平台", page_icon="🎯", layout="wide")
+st.title("🎯 韩国 Lotto 6/45 · V5.0 预测研究平台")
+st.caption("V5联合概率预测｜V4研究治理兼容｜手动历史数据导入｜离线滚动回测")
 
 if "v40_events" not in st.session_state:
     st.session_state["v40_events"] = []
@@ -168,7 +168,7 @@ m1.metric("有效历史记录", f"{quality['rows']:,}期")
 m2.metric("最新期号", f"第{quality['last_draw']}期")
 m3.metric("最新开奖日期", str(last["date"] or "未提供"))
 m4.metric("历史序列", "从第1期连续" if quality["sequence_complete"] else f"缺{len(quality['missing_draws'])}期")
-st.caption(f"数据来源：{data_source}｜引擎版本：{ENGINE_VERSION}｜数据仅由用户手动提供")
+st.caption(f"数据来源：{data_source}｜治理底座版本：{ENGINE_VERSION}｜数据仅由用户手动提供")
 
 if "v36_project_state" not in st.session_state:
     st.session_state["v36_project_state"] = new_project_state()
