@@ -60,7 +60,9 @@ from v40_governance import (
     make_event as v40_make_event,
     evaluate_forward_pairs as v40_evaluate_forward_pairs,
 )
-from v50_predictive_engine import fit_predict_next as v50_fit_predict_next, generate_tickets as v50_generate_tickets, build_v50_forward_lock\nfrom v50_backtest import run_v50_walk_forward\nfrom v40_store import (
+from v50_predictive_engine import fit_predict_next as v50_fit_predict_next, generate_tickets as v50_generate_tickets, build_v50_forward_lock
+from v50_backtest import run_v50_walk_forward
+from v40_store import (
     EventStoreError, GitHubEventStore, export_event_archive,
     import_event_archive, latest_model_snapshot, events_to_forward_locks,
 )
