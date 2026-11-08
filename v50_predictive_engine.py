@@ -207,18 +207,26 @@ def _fit_from_feature_cache(
     target_idx: int,
     training_window: int,
     ridge_alpha: float,
+    excluded_features: tuple[str, ...] = (),
 ) -> tuple[np.ndarray, np.ndarray, dict[str, Any]]:
+    unknown = set(excluded_features) - set(FEATURE_NAMES)
+    if unknown:
+        raise ValueError("未知的V5特征：" + ", ".join(sorted(unknown)))
+    selected_columns = [idx for idx, name in enumerate(FEATURE_NAMES) if name not in set(excluded_features)]
+    if not selected_columns:
+        raise ValueError("至少保留一个V5预测特征。")
     first_train = max(min(feature_cache), int(target_idx) - int(training_window))
     train_indices = list(range(first_train, int(target_idx)))
     if len(train_indices) < 30:
         raise ValueError("V5可用的时间顺序训练样本不足。")
-    x_train = np.vstack([feature_cache[i][0] for i in train_indices])
+    x_train = np.vstack([feature_cache[i][0] for i in train_indices])[:, selected_columns]
     y_train = np.concatenate([
         np.isin(np.arange(1, 46), matrix[i]).astype(float)
         for i in train_indices
     ])
     fitted = _fit_ridge_logistic(x_train, y_train, alpha=ridge_alpha)
     target_features, pair_scores = feature_cache[int(target_idx)]
+    target_features = target_features[:, selected_columns]
     z = np.clip((target_features - fitted["mean"]) / fitted["scale"], -8.0, 8.0)
     raw_scores = fitted["beta"][0] + z @ fitted["beta"][1:]
     probabilities = _calibrate_to_six(raw_scores)
@@ -230,8 +238,9 @@ def _fit_from_feature_cache(
         "fit_iterations": fitted["iterations"],
         "feature_coefficients": {
             name: float(value)
-            for name, value in zip(FEATURE_NAMES, fitted["beta"][1:])
+            for name, value in zip([FEATURE_NAMES[i] for i in selected_columns], fitted["beta"][1:])
         },
+        "excluded_features": list(excluded_features),
     }
     return probabilities, pair_scores, diagnostics
 
