@@ -53,6 +53,11 @@ class V50PredictiveEngineTests(unittest.TestCase):
         self.assertEqual(len(tickets), 10)
         self.assertEqual(len({tuple(x) for x in tickets}), 10)
         self.assertTrue(all(len(x) == 6 and len(set(x)) == 6 and min(x) >= 1 and max(x) <= 45 for x in tickets))
+        lock, metadata = build_v50_forward_lock(frame, result, tickets_per_group=10, seed=42)
+        self.assertEqual(len(lock), 20)
+        self.assertEqual(metadata["target_draw"], 91)
+        self.assertEqual(lock["策略"].value_counts().to_dict(), {"V5联合概率模型": 10, "均匀随机对照": 10})
+        self.assertEqual(lock["目标期号"].nunique(), 1)
 
     def test_walk_forward_is_reproducible_and_has_random_control(self):
         frame = synthetic_history(100)
