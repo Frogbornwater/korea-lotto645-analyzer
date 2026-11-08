@@ -164,13 +164,17 @@ def run_v50_walk_forward(
     for key, label in metric_pairs:
         diffs = detail[f"差值_{key}"].to_numpy(dtype=float)
         low, high = _bootstrap_mean_ci(diffs, bootstrap_reps, seed + len(summary_rows) * 31)
+        v4_diffs = detail[f"差值_V5_vs_V4_{key}"].to_numpy(dtype=float)
+        v4_low, v4_high = _bootstrap_mean_ci(v4_diffs, bootstrap_reps, seed + 1701 + len(summary_rows) * 31)
         summary_rows.append({
             "指标": label,
             "V5平均": float(detail[f"V5_{key}"].mean()),
             "V4冻结模型平均": float(detail[f"V4_{key}"].mean()),
             "随机基准平均": float(detail[f"随机_{key}"].mean()),
             "差值": float(diffs.mean()),
-            "V5_vs_V4差值": float(detail[f"差值_V5_vs_V4_{key}"].mean()),
+            "V5_vs_V4差值": float(v4_diffs.mean()),
+            "V5_vs_V4差值95%CI下限": v4_low,
+            "V5_vs_V4差值95%CI上限": v4_high,
             "差值95%CI下限": low,
             "差值95%CI上限": high,
             "V5领先期数": int(np.sum(diffs > 0)),
@@ -185,6 +189,7 @@ def run_v50_walk_forward(
         improvement = random_values - v5_values
         v4_improvement = v4_values - v5_values
         low, high = _bootstrap_mean_ci(improvement, bootstrap_reps, seed + 911 + len(summary_rows))
+        v4_low, v4_high = _bootstrap_mean_ci(v4_improvement, bootstrap_reps, seed + 1901 + len(summary_rows))
         summary_rows.append({
             "指标": label,
             "V5平均": float(v5_values.mean()),
@@ -192,6 +197,8 @@ def run_v50_walk_forward(
             "随机基准平均": float(random_values.mean()),
             "差值": float(improvement.mean()),
             "V5_vs_V4差值": float(v4_improvement.mean()),
+            "V5_vs_V4差值95%CI下限": v4_low,
+            "V5_vs_V4差值95%CI上限": v4_high,
             "差值95%CI下限": low,
             "差值95%CI上限": high,
             "V5领先期数": int(np.sum(improvement > 0)),
