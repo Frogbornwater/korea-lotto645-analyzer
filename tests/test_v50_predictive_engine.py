@@ -78,6 +78,22 @@ class V50PredictiveEngineTests(unittest.TestCase):
         self.assertEqual(a["detail"]["随机_mean_hits"].tolist(), b["detail"]["随机_mean_hits"].tolist())
         self.assertIn("随机基准平均", a["summary"].columns.tolist())
         self.assertTrue(np.allclose(a["detail"]["V5_概率和"], 6.0, atol=1e-5))
+        placebo_a = run_v50_walk_forward(
+            frame, test_draws=3, training_window=50, min_history=30,
+            tickets_per_draw=5, seed=99, bootstrap_reps=100,
+            placebo_seed=1234,
+        )
+        placebo_b = run_v50_walk_forward(
+            frame, test_draws=3, training_window=50, min_history=30,
+            tickets_per_draw=5, seed=99, bootstrap_reps=100,
+            placebo_seed=1234,
+        )
+        self.assertTrue(placebo_a["label_placebo"])
+        self.assertEqual(placebo_a["placebo_seed"], 1234)
+        self.assertEqual(
+            placebo_a["detail"]["V5_mean_hits"].tolist(),
+            placebo_b["detail"]["V5_mean_hits"].tolist(),
+        )
 
 
 if __name__ == "__main__":
