@@ -107,12 +107,15 @@ def run_v50_walk_forward(
         model_metrics = _score_ticket_batch(model_tickets, actual)
         random_metrics = _score_ticket_batch(random_tickets, actual)
         brier, log_loss = _probability_scores(probabilities, actual)
+        random_brier, random_log_loss = _probability_scores(np.full(45, 6.0 / 45.0), actual)
         row: dict[str, Any] = {
             "目标期号": target_draw,
             "训练结束期": int(draws[target_idx - 1]),
             "训练期数": int(diagnostics["training_draws"]),
             "V5_Brier": brier,
             "V5_LogLoss": log_loss,
+            "随机_Brier": random_brier,
+            "随机_LogLoss": random_log_loss,
             "V5_概率和": float(probabilities.sum()),
             "V5_号码列表": "|".join(str(x) for x in model_tickets),
             "随机_号码列表": "|".join(str(x) for x in random_tickets),
@@ -150,6 +153,23 @@ def run_v50_walk_forward(
             "V5领先期数": int(np.sum(diffs > 0)),
             "随机领先期数": int(np.sum(diffs < 0)),
             "平局期数": int(np.sum(diffs == 0)),
+        })
+    for metric, label in (("Brier", "概率Brier分数"), ("LogLoss", "概率Log Loss")):
+        v5_values = detail[f"V5_{metric}"].to_numpy(dtype=float)
+        random_values = detail[f"随机_{metric}"].to_numpy(dtype=float)
+        # Proper scores are lower-is-better; positive delta means V5 is better.
+        improvement = random_values - v5_values
+        low, high = _bootstrap_mean_ci(improvement, bootstrap_reps, seed + 911 + len(summary_rows))
+        summary_rows.append({
+            "指标": label,
+            "V5平均": float(v5_values.mean()),
+            "随机基准平均": float(random_values.mean()),
+            "差值": float(improvement.mean()),
+            "差值95%CI下限": low,
+            "差值95%CI上限": high,
+            "V5领先期数": int(np.sum(improvement > 0)),
+            "随机领先期数": int(np.sum(improvement < 0)),
+            "平局期数": int(np.sum(improvement == 0)),
         })
     summary = pd.DataFrame(summary_rows)
     fingerprint = hashlib.sha256(clean.to_csv(index=False).encode("utf-8")).hexdigest()
