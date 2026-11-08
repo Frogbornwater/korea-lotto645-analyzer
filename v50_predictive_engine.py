@@ -208,6 +208,7 @@ def _fit_from_feature_cache(
     training_window: int,
     ridge_alpha: float,
     excluded_features: tuple[str, ...] = (),
+    placebo_seed: int | None = None,
 ) -> tuple[np.ndarray, np.ndarray, dict[str, Any]]:
     unknown = set(excluded_features) - set(FEATURE_NAMES)
     if unknown:
@@ -220,10 +221,17 @@ def _fit_from_feature_cache(
     if len(train_indices) < 30:
         raise ValueError("V5可用的时间顺序训练样本不足。")
     x_train = np.vstack([feature_cache[i][0] for i in train_indices])[:, selected_columns]
-    y_train = np.concatenate([
+    y_train_matrix = np.vstack([
         np.isin(np.arange(1, 46), matrix[i]).astype(float)
         for i in train_indices
     ])
+    # Permute whole historical draw-label vectors across feature rows. This
+    # preserves six positives per draw and the empirical number marginals,
+    # while deliberately breaking the chronological feature/label alignment.
+    if placebo_seed is not None:
+        placebo_rng = np.random.default_rng(int(placebo_seed))
+        y_train_matrix = y_train_matrix[placebo_rng.permutation(len(y_train_matrix))]
+    y_train = y_train_matrix.reshape(-1)
     fitted = _fit_ridge_logistic(x_train, y_train, alpha=ridge_alpha)
     target_features, pair_scores = feature_cache[int(target_idx)]
     target_features = target_features[:, selected_columns]
@@ -241,6 +249,8 @@ def _fit_from_feature_cache(
             for name, value in zip([FEATURE_NAMES[i] for i in selected_columns], fitted["beta"][1:])
         },
         "excluded_features": list(excluded_features),
+        "label_placebo": placebo_seed is not None,
+        "placebo_seed": None if placebo_seed is None else int(placebo_seed),
     }
     return probabilities, pair_scores, diagnostics
 
