@@ -373,12 +373,18 @@ def build_v50_forward_lock(
     model_seed = int(np.random.SeedSequence([int(seed), target_draw, 5001]).generate_state(1)[0])
     random_seed = int(np.random.SeedSequence([int(seed), target_draw, 7001]).generate_state(1)[0])
     model_tickets = generate_tickets(probs, pair, int(tickets_per_group), model_seed, 0.5)
+    v4_prior = 174.941214
+    v4_counts = np.bincount(clean[NUMBER_COLS].to_numpy(dtype=np.int16).reshape(-1), minlength=46)[1:46].astype(float)
+    v4_raw = (v4_counts + v4_prior * BASE_RATE) / (len(clean) + v4_prior)
+    v4_probs = _calibrate_to_six(np.log(np.clip(v4_raw, 1e-9, 1.0 - 1e-9) / np.clip(1.0 - v4_raw, 1e-9, 1.0)))
+    v4_seed = int(np.random.SeedSequence([int(seed), target_draw, 6001]).generate_state(1)[0])
+    v4_tickets = generate_tickets(v4_probs, None, int(tickets_per_group), v4_seed, 0.0)
     random_tickets = generate_tickets(np.full(45, BASE_RATE), None, int(tickets_per_group), random_seed, 0.0)
     created = datetime.now(timezone.utc).isoformat(timespec="seconds")
     history_hash = hashlib.sha256(clean.to_csv(index=False).encode("utf-8")).hexdigest()
     probability_lookup = {int(row["号码"]): float(row["预测入选概率"]) for _, row in probs_frame.iterrows()}
     records: list[dict[str, Any]] = []
-    for group, tickets in ((MODEL_NAME, model_tickets), ("均匀随机对照", random_tickets)):
+    for group, tickets in ((MODEL_NAME, model_tickets), ("V4冻结长期频率模型", v4_tickets), ("均匀随机对照", random_tickets)):
         for ticket_no, ticket in enumerate(tickets, 1):
             record = {
                 "目标期号": target_draw,
@@ -386,7 +392,7 @@ def build_v50_forward_lock(
                 "策略": group,
                 "注序": ticket_no,
                 "号码": "-".join(f"{x:02d}" for x in ticket),
-                "V5边际概率之和": float(sum(probability_lookup[x] for x in ticket)) if group == MODEL_NAME else None,
+                "模型边际概率之和": float(sum(probability_lookup[x] for x in ticket)) if group == MODEL_NAME else (float(sum(v4_probs[x - 1] for x in ticket)) if group == "V4冻结长期频率模型" else None),
             }
             record.update({f"n{i}": number for i, number in enumerate(ticket, 1)})
             records.append(record)
@@ -405,6 +411,8 @@ def build_v50_forward_lock(
         "min_history": int(prediction["min_history"]),
         "tickets_per_group": int(tickets_per_group),
         "model_seed": model_seed,
+        "v4_frozen_long_prior": v4_prior,
+        "v4_seed": v4_seed,
         "random_seed": random_seed,
         "paired_control": "均匀随机对照",
         "policy": "预测在目标期开奖结果导入前生成并保存；开奖后不得重写",
