@@ -250,6 +250,7 @@ def fit_predict_next(
     training_window: int = 500,
     min_history: int = 180,
     ridge_alpha: float = 1.0,
+    feature_exclusions: tuple[str, ...] = (),
 ) -> dict[str, Any]:
     """Fit the V5 model on prequential historical feature rows and predict next draw."""
     clean = validate_frame(history)
@@ -271,7 +272,7 @@ def fit_predict_next(
         for idx in range(cache_start, n + 1)
     }
     probabilities, pair_scores, diagnostics = _fit_from_feature_cache(
-        matrix, cache, n, training_window, ridge_alpha
+        matrix, cache, n, training_window, ridge_alpha, feature_exclusions
     )
     probability_frame = pd.DataFrame({
         "号码": np.arange(1, 46, dtype=int),
@@ -289,6 +290,7 @@ def fit_predict_next(
         "training_window": training_window,
         "min_history": int(min_history),
         "ridge_alpha": float(ridge_alpha),
+        "feature_exclusions": list(feature_exclusions),
         "number_probabilities": probability_frame,
         "probability_sum": float(probabilities.sum()),
         "pair_scores": pair_scores,
