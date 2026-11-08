@@ -382,8 +382,27 @@ def build_v50_forward_lock(
     pair = np.asarray(prediction["pair_scores"], dtype=float)
     target_draw = int(draws[-1]) + 1
     model_seed = int(np.random.SeedSequence([int(seed), target_draw, 5001]).generate_state(1)[0])
+    frequency_seed = int(np.random.SeedSequence([int(seed), target_draw, 5501]).generate_state(1)[0])
     random_seed = int(np.random.SeedSequence([int(seed), target_draw, 7001]).generate_state(1)[0])
     model_tickets = generate_tickets(probs, pair, int(tickets_per_group), model_seed, 0.5)
+
+    frequency_only_exclusions = (
+        "trend_30_minus_120", "ewma_35_z", "gap_log_scaled",
+        "pair_mean_log_lift", "pair_sd_log_lift",
+    )
+    matrix = clean[NUMBER_COLS].to_numpy(dtype=np.int16, copy=True)
+    cache_start = max(int(prediction["min_history"]), len(matrix) - int(prediction["training_window"]))
+    feature_cache = {
+        idx: build_number_features(matrix[:idx])
+        for idx in range(cache_start, len(matrix) + 1)
+    }
+    frequency_probs, _, _ = _fit_from_feature_cache(
+        matrix, feature_cache, len(matrix), int(prediction["training_window"]),
+        float(prediction["ridge_alpha"]), frequency_only_exclusions,
+    )
+    frequency_tickets = generate_tickets(
+        frequency_probs, None, int(tickets_per_group), frequency_seed, 0.0
+    )
     v4_prior = 174.941214
     v4_counts = np.bincount(clean[NUMBER_COLS].to_numpy(dtype=np.int16).reshape(-1), minlength=46)[1:46].astype(float)
     v4_raw = (v4_counts + v4_prior * BASE_RATE) / (len(clean) + v4_prior)
@@ -394,8 +413,14 @@ def build_v50_forward_lock(
     created = datetime.now(timezone.utc).isoformat(timespec="seconds")
     history_hash = hashlib.sha256(clean.to_csv(index=False).encode("utf-8")).hexdigest()
     probability_lookup = {int(row["号码"]): float(row["预测入选概率"]) for _, row in probs_frame.iterrows()}
+    frequency_lookup = {number: float(frequency_probs[number - 1]) for number in range(1, 46)}
     records: list[dict[str, Any]] = []
-    for group, tickets in ((MODEL_NAME, model_tickets), ("V4冻结长期频率模型", v4_tickets), ("均匀随机对照", random_tickets)):
+    for group, tickets in (
+        (MODEL_NAME, model_tickets),
+        ("V5频率精简模型", frequency_tickets),
+        ("V4冻结长期频率模型", v4_tickets),
+        ("均匀随机对照", random_tickets),
+    ):
         for ticket_no, ticket in enumerate(tickets, 1):
             record = {
                 "目标期号": target_draw,
@@ -403,7 +428,11 @@ def build_v50_forward_lock(
                 "策略": group,
                 "注序": ticket_no,
                 "号码": "-".join(f"{x:02d}" for x in ticket),
-                "模型边际概率之和": float(sum(probability_lookup[x] for x in ticket)) if group == MODEL_NAME else (float(sum(v4_probs[x - 1] for x in ticket)) if group == "V4冻结长期频率模型" else None),
+                "模型边际概率之和": (
+                    float(sum(probability_lookup[x] for x in ticket)) if group == MODEL_NAME
+                    else (float(sum(frequency_lookup[x] for x in ticket)) if group == "V5频率精简模型"
+                    else (float(sum(v4_probs[x - 1] for x in ticket)) if group == "V4冻结长期频率模型" else None))
+                ),
             }
             record.update({f"n{i}": number for i, number in enumerate(ticket, 1)})
             records.append(record)
@@ -422,6 +451,8 @@ def build_v50_forward_lock(
         "min_history": int(prediction["min_history"]),
         "tickets_per_group": int(tickets_per_group),
         "model_seed": model_seed,
+        "frequency_only_seed": frequency_seed,
+        "frequency_only_excluded_features": list(frequency_only_exclusions),
         "v4_frozen_long_prior": v4_prior,
         "v4_seed": v4_seed,
         "random_seed": random_seed,
