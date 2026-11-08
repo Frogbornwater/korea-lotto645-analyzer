@@ -105,8 +105,10 @@ def run_v50_walk_forward(
         target_draw = int(draws[target_idx])
         actual = set(int(x) for x in matrix[target_idx])
         target_seed = int(np.random.SeedSequence([int(seed), target_draw]).generate_state(1)[0])
+        pair_ablation = {"pair_mean_log_lift", "pair_sd_log_lift"}.intersection(feature_exclusions)
         model_tickets = generate_tickets(
-            probabilities, pair_scores, tickets_per_draw, target_seed, pair_strength=0.5
+            probabilities, pair_scores, tickets_per_draw, target_seed,
+            pair_strength=0.0 if pair_ablation else 0.5
         )
         v4_probabilities = _v4_long_frequency_probabilities(matrix[:target_idx], 174.941214)
         v4_tickets = generate_tickets(
