@@ -1135,7 +1135,7 @@ with page_v50:
                 st.error(f"V5.0回测失败：{type(exc).__name__}: {exc}")
     result = st.session_state.get("v50_backtest_result")
     if result:
-        st.markdown("### V5.0 / V4.0冻结模型 / 随机基准三方对照")
+        st.markdown("### V5.0完整模型 / V5频率精简模型 / V4冻结模型 / 随机四方对照")
         st.caption(f"回测范围：第{result['test_start_draw']}—{result['test_end_draw']}期；状态：历史回溯，不是前瞻证据。")
         st.dataframe(result["summary"].round(5), hide_index=True, use_container_width=True)
         st.download_button(
@@ -1200,7 +1200,7 @@ with page_v50:
         lock_detail = st.session_state.get("v50_forward_lock_detail")
         lock_metadata = st.session_state.get("v50_forward_lock_metadata")
         if isinstance(lock_detail, pd.DataFrame) and lock_metadata:
-            st.markdown("#### V5 / V4冻结模型 / 随机对照锁定记录")
+            st.markdown("#### V5完整模型 / V5频率精简模型 / V4冻结模型 / 随机对照锁定记录")
             st.dataframe(lock_detail, hide_index=True, use_container_width=True)
             st.download_button(
                 "下载V5前瞻锁定CSV（含随机对照）",
