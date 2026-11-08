@@ -321,18 +321,21 @@ def generate_tickets(
     while len(tickets) < int(count) and attempts < max_attempts:
         attempts += 1
         selected: list[int] = []
+        selected_indices: list[int] = []
         for _ in range(6):
             scores = base_logits.copy()
-            if selected:
-                scores += float(pair_strength) * pair[:, selected].sum(axis=1)
-            scores[selected] = -np.inf
+            if selected_indices:
+                scores += float(pair_strength) * pair[:, selected_indices].sum(axis=1)
+            scores[selected_indices] = -np.inf
             finite = scores[np.isfinite(scores)]
             shifted = scores - float(np.max(finite))
             weights = np.zeros(45, dtype=float)
             available = np.isfinite(scores)
             weights[available] = np.exp(np.clip(shifted[available], -40.0, 0.0))
             weights /= weights.sum()
-            selected.append(int(rng.choice(np.arange(1, 46), p=weights)))
+            chosen_index = int(rng.choice(np.arange(45), p=weights))
+            selected_indices.append(chosen_index)
+            selected.append(chosen_index + 1)
         ticket = sorted(selected)
         if ticket not in tickets:
             tickets.append(ticket)
