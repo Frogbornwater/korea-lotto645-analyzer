@@ -5,7 +5,7 @@ import pandas as pd
 
 from v50_predictive_engine import (
     BASE_RATE, _calibrate_to_six, build_number_features,
-    fit_predict_next, generate_tickets,
+    fit_predict_next, generate_tickets, build_v50_forward_lock,
 )
 from v50_backtest import run_v50_walk_forward
 
