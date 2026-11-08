@@ -23,3 +23,5 @@ jobs:
         run: python -m unittest discover -s tests -v
       - name: Run retrospective V5 real-history benchmark
         run: python scripts/v50_real_data_benchmark.py
+      - name: Run V5 feature ablation screen
+        run: python scripts/v50_feature_ablation.py
