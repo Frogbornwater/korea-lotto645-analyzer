@@ -21,6 +21,7 @@ for _module_name in (
 ):
     sys.modules.pop(_module_name, None)
 
+import numpy as np
 import pandas as pd
 import plotly.express as px
 import streamlit as st
