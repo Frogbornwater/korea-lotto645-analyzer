@@ -173,8 +173,8 @@ st.caption(f"数据来源：{data_source}｜治理底座版本：{ENGINE_VERSION
 if "v36_project_state" not in st.session_state:
     st.session_state["v36_project_state"] = new_project_state()
 
-page_overview, page_pick, page_stats, page_backtest, page_optimizer, page_joint, page_robust, page_ensemble, page_portfolio, page_models, page_data, page_review, page_v40 = st.tabs([
-    "系统总览", "智能选号", "历史统计", "回测中心", "单模型参数实验", "V3.7联合优化", "V3.8稳健研究", "模型集成", "组合优化", "模型管理", "数据管理", "选号复盘", "V4.0研究治理"
+page_overview, page_pick, page_stats, page_backtest, page_optimizer, page_joint, page_robust, page_ensemble, page_portfolio, page_models, page_data, page_review, page_v40, page_v50 = st.tabs([
+    "系统总览", "智能选号", "历史统计", "回测中心", "单模型参数实验", "V3.7联合优化", "V3.8稳健研究", "模型集成", "组合优化", "模型管理", "数据管理", "选号复盘", "V4.0研究治理", "V5.0预测研究"
 ])
 
 with page_overview:
