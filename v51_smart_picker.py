@@ -6,8 +6,6 @@ never accesses remote lottery services or retrieves draw data.
 """
 from __future__ import annotations
 
-from typing import Sequence
-
 import numpy as np
 
 from v50_predictive_engine import generate_tickets
@@ -40,6 +38,9 @@ def generate_constrained_tickets(
         raise ValueError("V5号码概率总和必须约为6。")
 
     for ceiling in range(requested, 6):
+        # Ten disjoint six-number tickets cannot fit into a 45-number universe.
+        if ceiling == 0 and count * 6 > 45:
+            continue
         accepted: list[list[int]] = []
         max_attempts = max(2500, count * 500)
         for attempt in range(max_attempts):
