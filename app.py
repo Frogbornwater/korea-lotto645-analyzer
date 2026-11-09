@@ -17,7 +17,7 @@ sys.path.insert(0, _APP_ROOT)
 for _module_name in (
     "backtest_engine", "joint_optimizer", "robust_optimizer", "parameter_optimizer",
     "portfolio_optimizer", "lotto_core", "model_registry", "model_management",
-    "experiment_export", "data_manager", "v40_governance", "v40_store", "v50_predictive_engine", "v50_backtest",
+    "experiment_export", "data_manager", "v40_governance", "v40_store", "v50_predictive_engine", "v50_backtest", "v51_smart_picker",
 ):
     sys.modules.pop(_module_name, None)
 
