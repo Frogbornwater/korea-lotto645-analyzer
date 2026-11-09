@@ -221,7 +221,7 @@ with page_pick:
     if model == V51_MODEL_NAME:
         st.markdown("#### V5联合概率模型设置")
         st.caption("V5使用全部有效手动历史序列拟合下一期45个号码的边际入选概率；上面的“近期数据窗口”只对旧模型生效。")
-        valid_v51_windows = [w for w in [300, 400, 500, 700, 900] if w <= min(1000, len(df))]
+        valid_v51_windows = [w for w in [180, 200, 250, 300, 400, 500, 700, 900, 1000] if w <= min(1000, max(180, len(df)))]
         if not valid_v51_windows:
             st.warning("V5需要至少210期连续有效历史数据，并且至少有一个可用训练窗口。")
         else:
