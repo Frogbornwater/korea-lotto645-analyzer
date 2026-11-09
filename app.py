@@ -221,24 +221,27 @@ with page_pick:
     if model == V51_MODEL_NAME:
         st.markdown("#### V5联合概率模型设置")
         st.caption("V5使用全部有效手动历史序列拟合下一期45个号码的边际入选概率；上面的“近期数据窗口”只对旧模型生效。")
-        valid_v51_windows = [w for w in [180, 200, 250, 300, 400, 500, 700, 900, 1000] if w <= min(1000, max(180, len(df)))]
-        if not valid_v51_windows:
-            st.warning("V5需要至少210期连续有效历史数据，并且至少有一个可用训练窗口。")
+        if len(df) < 210:
+            st.warning("当前有效历史不足210期，V5暂时不能生成预测。")
         else:
-            default_v51 = 500 if 500 in valid_v51_windows else valid_v51_windows[-1]
-            v51_training_window = st.selectbox(
-                "V5训练窗口", valid_v51_windows,
-                index=valid_v51_windows.index(default_v51), key="v51_pick_training_window",
-            )
-            v51_alpha = st.select_slider(
-                "V5 Ridge正则化强度", options=[0.1, 0.3, 1.0, 3.0, 10.0],
-                value=1.0, key="v51_pick_alpha",
-            )
-            v51_pair_strength = st.slider(
-                "号码共现弱调整强度", 0.0, 1.0, 0.5, 0.05,
-                help="只作为候选组合抽样的弱调整，不代表已经验证的号码关系。",
-                key="v51_pick_pair_strength",
-            )
+            valid_v51_windows = [w for w in [180, 200, 250, 300, 400, 500, 700, 900, 1000] if w <= min(1000, len(df))]
+            if not valid_v51_windows:
+                st.warning("当前没有可用的V5训练窗口。")
+            else:
+                default_v51 = 500 if 500 in valid_v51_windows else valid_v51_windows[-1]
+                v51_training_window = st.selectbox(
+                    "V5训练窗口", valid_v51_windows,
+                    index=valid_v51_windows.index(default_v51), key="v51_pick_training_window",
+                )
+                v51_alpha = st.select_slider(
+                    "V5 Ridge正则化强度", options=[0.1, 0.3, 1.0, 3.0, 10.0],
+                    value=1.0, key="v51_pick_alpha",
+                )
+                v51_pair_strength = st.slider(
+                    "号码共现弱调整强度", 0.0, 1.0, 0.5, 0.05,
+                    help="只作为候选组合抽样的弱调整，不代表已经验证的号码关系。",
+                    key="v51_pick_pair_strength",
+                )
 
     if st.button("生成候选号码", type="primary", use_container_width=True, key="v51_generate_candidates"):
         try:
