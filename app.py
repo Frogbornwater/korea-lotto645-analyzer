@@ -61,6 +61,7 @@ from v40_governance import (
     evaluate_forward_pairs as v40_evaluate_forward_pairs,
 )
 from v50_predictive_engine import fit_predict_next as v50_fit_predict_next, generate_tickets as v50_generate_tickets, build_v50_forward_lock
+from v51_smart_picker import generate_constrained_tickets as v51_generate_constrained_tickets
 from v50_backtest import run_v50_walk_forward
 from v40_store import (
     EventStoreError, GitHubEventStore, export_event_archive,
@@ -200,29 +201,168 @@ with page_overview:
 
 with page_pick:
     st.subheader("生成10组候选号码")
-    st.warning("任意一组固定六号码的理论头奖概率相同。模型分数是历史统计权重，不是中奖概率。")
+    st.warning("公平独立开奖下，每组固定六号码的理论头奖概率相同。模型相对评分不是中奖概率，也不是已校准的整注联合概率。")
+    V51_MODEL_NAME = "V5联合概率模型"
+    pick_models = [*MODEL_NAMES, V51_MODEL_NAME]
     left, right = st.columns(2)
     with left:
-        model = st.selectbox("选号模型", MODEL_NAMES, index=4)
-        window_label = st.selectbox("近期数据窗口", ["最近30期", "最近50期", "最近100期", "最近200期", "最近500期", "全部历史"], index=2)
+        model = st.selectbox("选号模型", pick_models, index=4, key="v51_pick_model")
+        window_label = st.selectbox("近期数据窗口（旧模型使用）", ["最近30期", "最近50期", "最近100期", "最近200期", "最近500期", "全部历史"], index=2)
         window = None if window_label == "全部历史" else int(window_label.replace("最近", "").replace("期", ""))
     with right:
         count = 10
         st.metric("本次候选组合数量", "10组")
-        overlap = st.slider("任意两组最多共享号码数", 0, 5, 4)
-        seed_text = st.text_input("随机种子（留空则每次不同）", "")
-    if st.button("生成候选号码", type="primary", use_container_width=True):
+        overlap = st.slider("任意两组最多共享号码数", 0, 5, 4, key="v51_pick_overlap")
+        seed_text = st.text_input("随机种子（留空则每次不同）", "", key="v51_pick_seed")
+
+    v51_training_window = 500
+    v51_alpha = 1.0
+    v51_pair_strength = 0.5
+    if model == V51_MODEL_NAME:
+        st.markdown("#### V5联合概率模型设置")
+        st.caption("V5使用全部有效手动历史序列拟合下一期45个号码的边际入选概率；上面的“近期数据窗口”只对旧模型生效。")
+        valid_v51_windows = [w for w in [300, 400, 500, 700, 900] if w <= min(1000, len(df))]
+        if not valid_v51_windows:
+            st.warning("V5需要至少210期连续有效历史数据，并且至少有一个可用训练窗口。")
+        else:
+            default_v51 = 500 if 500 in valid_v51_windows else valid_v51_windows[-1]
+            v51_training_window = st.selectbox(
+                "V5训练窗口", valid_v51_windows,
+                index=valid_v51_windows.index(default_v51), key="v51_pick_training_window",
+            )
+            v51_alpha = st.select_slider(
+                "V5 Ridge正则化强度", options=[0.1, 0.3, 1.0, 3.0, 10.0],
+                value=1.0, key="v51_pick_alpha",
+            )
+            v51_pair_strength = st.slider(
+                "号码共现弱调整强度", 0.0, 1.0, 0.5, 0.05,
+                help="只作为候选组合抽样的弱调整，不代表已经验证的号码关系。",
+                key="v51_pick_pair_strength",
+            )
+
+    if st.button("生成候选号码", type="primary", use_container_width=True, key="v51_generate_candidates"):
         try:
-            seed_value = int(seed_text.strip()) if seed_text.strip() else None
-            generated, relaxed = generate_candidates(df, count, model, window or len(df), overlap, seed_value)
-            st.session_state["v36_candidates"] = generated
-            st.session_state["v36_candidate_model"] = model
-            st.session_state["v36_candidate_window"] = window_label
-            st.session_state["v36_candidate_relaxed"] = relaxed
+            seed_value = int(seed_text.strip()) if seed_text.strip() else int(
+                np.random.SeedSequence().generate_state(1)[0]
+            )
+            if model == V51_MODEL_NAME:
+                if len(df) < 210:
+                    raise ValueError("V5至少需要210期连续有效历史数据。")
+                prediction = v50_fit_predict_next(
+                    df, training_window=int(v51_training_window),
+                    min_history=180, ridge_alpha=float(v51_alpha),
+                )
+                probability_vector = (
+                    prediction["number_probabilities"].sort_values("号码")["预测入选概率"].to_numpy(dtype=float)
+                )
+                v51_tickets, effective_overlap, overlap_relaxed = v51_generate_constrained_tickets(
+                    probability_vector, prediction["pair_scores"], count=count,
+                    seed=seed_value, pair_strength=float(v51_pair_strength),
+                    max_overlap=int(overlap),
+                )
+                pair_matrix = np.asarray(prediction["pair_scores"], dtype=float)
+                rows = []
+                raw_scores = []
+                for ticket_no, ticket in enumerate(v51_tickets, 1):
+                    marginal_sum = float(sum(probability_vector[n - 1] for n in ticket))
+                    pair_adjustment = float(sum(
+                        pair_matrix[a - 1, b - 1]
+                        for pos, a in enumerate(ticket) for b in ticket[pos + 1:]
+                    ))
+                    logit_score = float(sum(
+                        np.log(probability_vector[n - 1] / (1.0 - probability_vector[n - 1]))
+                        for n in ticket
+                    ))
+                    composite_score = logit_score + float(v51_pair_strength) * pair_adjustment
+                    raw_scores.append(composite_score)
+                    rows.append({
+                        "组合": f"{ticket_no:02d}",
+                        "号码": " · ".join(f"{n:02d}" for n in ticket),
+                        "和值": int(sum(ticket)),
+                        "奇数个数": int(sum(n % 2 for n in ticket)),
+                        "低中高区": f"{sum(n <= 15 for n in ticket)}-{sum(16 <= n <= 30 for n in ticket)}-{sum(n >= 31 for n in ticket)}",
+                        "六号码边际概率合计": marginal_sum,
+                        "共现调整项": pair_adjustment,
+                        "模型原始组合分": composite_score,
+                    })
+                raw = np.asarray(raw_scores, dtype=float)
+                lo, hi = float(raw.min()), float(raw.max())
+                for row in rows:
+                    row["模型相对得分"] = 50.0 if hi - lo < 1e-12 else 100.0 * (row["模型原始组合分"] - lo) / (hi - lo)
+                    row["请求跨组最大重号"] = int(overlap)
+                    row["实际允许最大重号"] = int(effective_overlap)
+                v51_frame = pd.DataFrame(rows).sort_values(
+                    ["模型相对得分", "组合"], ascending=[False, True]
+                ).reset_index(drop=True)
+                st.session_state["v51_smart_pick"] = {
+                    "frame": v51_frame,
+                    "prediction": prediction,
+                    "requested_overlap": int(overlap),
+                    "effective_overlap": int(effective_overlap),
+                    "overlap_relaxed": bool(overlap_relaxed),
+                    "seed": int(seed_value),
+                    "pair_strength": float(v51_pair_strength),
+                }
+                st.session_state.pop("v36_candidates", None)
+            else:
+                generated, relaxed = generate_candidates(
+                    df, count, model, window or len(df), overlap, seed_value
+                )
+                st.session_state["v36_candidates"] = generated
+                st.session_state["v36_candidate_model"] = model
+                st.session_state["v36_candidate_window"] = window_label
+                st.session_state["v36_candidate_relaxed"] = relaxed
+                st.session_state.pop("v51_smart_pick", None)
         except Exception as exc:
-            st.error(f"选号失败：{exc}")
+            st.error(f"选号失败：{type(exc).__name__}: {exc}")
+
+    v51_result = st.session_state.get("v51_smart_pick")
+    if model == V51_MODEL_NAME and isinstance(v51_result, dict):
+        prediction = v51_result["prediction"]
+        st.markdown("### V5联合概率模型候选结果")
+        target_col, end_col, sum_col, window_col = st.columns(4)
+        target_col.metric("预测目标期", f"第{prediction['target_draw']}期")
+        end_col.metric("训练数据末期", f"第{prediction['history_last_draw']}期")
+        sum_col.metric("45个号码概率总和", f"{prediction['probability_sum']:.6f}")
+        window_col.metric("训练窗口", f"{prediction['training_window']}期")
+        st.caption(
+            f"Ridge alpha={prediction['ridge_alpha']}｜随机种子={v51_result['seed']}｜"
+            f"共现弱调整={v51_result['pair_strength']:.2f}"
+        )
+        st.dataframe(v51_result["frame"].round(5), hide_index=True, use_container_width=True)
+        if v51_result["overlap_relaxed"]:
+            st.warning(
+                f"为了生成10组不同组合，程序将跨组共享号码上限从"
+                f"{v51_result['requested_overlap']}放宽到{v51_result['effective_overlap']}。"
+            )
+        else:
+            st.caption(f"10组组合均满足任意两组最多共享{v51_result['requested_overlap']}个号码的限制。")
+        st.download_button(
+            "下载V5智能选号CSV",
+            v51_result["frame"].to_csv(index=False).encode("utf-8-sig"),
+            f"lotto645_v51_smart_pick_draw_{prediction['target_draw']}.csv",
+            "text/csv", key="v51_smart_pick_download",
+        )
+        with st.expander("查看V5模型号码概率与训练诊断"):
+            st.write({
+                "引擎版本": prediction["engine_version"],
+                "历史范围": f"{prediction['history_first_draw']}—{prediction['history_last_draw']}",
+                "历史记录数": prediction["history_rows"],
+                "概率和": prediction["probability_sum"],
+                "训练诊断": prediction["diagnostics"],
+                "解释": prediction["interpretation"],
+            })
+            st.dataframe(
+                prediction["number_probabilities"].head(20).round(6),
+                hide_index=True, use_container_width=True,
+            )
+        st.info(
+            "“六号码边际概率合计”是所选六个号码的边际入选概率之和，可理解为模型估计的期望命中数；"
+            "“模型相对得分”仅用于本批候选内部排序，不是该整注号码的联合中奖概率。"
+        )
+
     generated = st.session_state.get("v36_candidates")
-    if generated is not None:
+    if model != V51_MODEL_NAME and generated is not None:
         st.markdown(f"#### {st.session_state.get('v36_candidate_model')} · {st.session_state.get('v36_candidate_window')}")
         st.dataframe(generated.drop(columns=["号码列表"], errors="ignore"), hide_index=True, use_container_width=True)
         if st.session_state.get("v36_candidate_relaxed"):
@@ -232,14 +372,18 @@ with page_pick:
             generated.drop(columns=["号码列表"], errors="ignore").to_csv(index=False).encode("utf-8-sig"),
             "lotto645_v36_candidates.csv", "text/csv",
         )
-    selected_window = len(df) if window is None else min(window, len(df))
-    scores = number_score_table(df, selected_window)
-    st.markdown("### 多模型号码相对评分")
-    st.plotly_chart(
-        px.bar(scores.sort_values("号码"), x="号码", y="综合相对得分", title="45个号码的统计相对评分（0—100）"),
-        use_container_width=True,
-    )
-    st.dataframe(scores.head(15).round(3), hide_index=True, use_container_width=True)
+
+    if model != V51_MODEL_NAME:
+        selected_window = len(df) if window is None else min(window, len(df))
+        scores = number_score_table(df, selected_window)
+        st.markdown("### 多模型号码相对评分")
+        st.plotly_chart(
+            px.bar(scores.sort_values("号码"), x="号码", y="综合相对得分", title="45个号码的统计相对评分（0—100）"),
+            use_container_width=True,
+        )
+        st.dataframe(scores.head(15).round(3), hide_index=True, use_container_width=True)
+    else:
+        st.caption("V5号码概率和候选组合评分已在上方单独展示；旧模型统计相对评分不参与V5选号。")
 
 with page_stats:
     st.subheader("历史数据统计")
