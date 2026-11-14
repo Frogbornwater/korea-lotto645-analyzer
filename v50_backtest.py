@@ -139,6 +139,13 @@ def run_v50_walk_forward(
             "随机_LogLoss": random_log_loss,
             "V5_概率和": float(probabilities.sum()),
             "V4_概率和": float(v4_probabilities.sum()),
+            "实际主号码": json.dumps(sorted(actual), ensure_ascii=False),
+            "V5_45号码概率_JSON": json.dumps([float(x) for x in probabilities], ensure_ascii=False, separators=(",", ":")),
+            "V4_45号码概率_JSON": json.dumps([float(x) for x in v4_probabilities], ensure_ascii=False, separators=(",", ":")),
+            "V5_引擎版本": V50_ENGINE_VERSION,
+            "训练窗口指纹_SHA256": hashlib.sha256(
+                matrix[max(0, target_idx - training_window):target_idx].tobytes()
+            ).hexdigest(),
             "V4_号码列表": "|".join(str(x) for x in v4_tickets),
             "V5_号码列表": "|".join(str(x) for x in model_tickets),
             "随机_号码列表": "|".join(str(x) for x in random_tickets),
