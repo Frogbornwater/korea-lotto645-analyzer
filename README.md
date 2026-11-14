@@ -25,6 +25,17 @@ V5.0 在 V4.0 研究治理基础上增加独立的联合概率预测研究引擎
 - V5.0 页面用于研究与前瞻对照，不会自动替换V4.0冻结模型或改变模型晋升门槛。
 - 正式判断必须依赖开奖前锁定、开奖后手动录入的新数据和预先规定的统计标准。
 
+## V5.2 逐期滚动训练与前瞻验证中心
+- The historical replay selector isolates the latest 100, 150, or 200 draws from the initial training cutoff and replays them sequentially. For each target, the engine uses only prior draws, scores the target, and then allows that observed result into the following target's history. The raw database is never deleted or modified.
+
+- 新增独立「V5.2逐期验证」页面；默认对当前手动导入数据的最近100期逐期回放。若历史截至第1250期，目标区间为第1151—1250期。
+- 每个目标期的特征和拟合只使用该期之前的数据；同时对照V4冻结长期频率模型与均匀随机基准。
+- 历史回放导出逐期明细和摘要，并明确标记为回溯性探索结果；不得将曾参与模型研究的数据称为全新独立测试或前瞻证据。
+- 前瞻锁定区生成V5.1十注候选和十注均匀随机对照，保存45个号码概率、配置、随机种子、开奖目标期及训练历史SHA-256指纹。
+- 开奖后只接受手动导入的历史CSV/XLSX/XLS；评分前重新计算锁定时历史前缀指纹，若不一致则拒绝评分。
+- 锁定事件可导出/导入V4.0 JSON事件档案；有配置研究分支Token时可通过既有V4.0事件存储保存，否则用户应自行下载备份。
+- 不删除原始开奖记录，不覆盖V4.0冻结快照，不连接官方开奖网站或API。
+
 ## V5.0 测试
 
 从完整仓库根目录执行：
