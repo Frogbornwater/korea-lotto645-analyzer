@@ -26,6 +26,7 @@ V5.0 在 V4.0 研究治理基础上增加独立的联合概率预测研究引擎
 - 正式判断必须依赖开奖前锁定、开奖后手动录入的新数据和预先规定的统计标准。
 
 ## V5.2 逐期滚动训练与前瞻验证中心
+- The historical replay selector isolates the latest 100, 150, or 200 draws from the initial training cutoff and replays them sequentially. For each target, the engine uses only prior draws, scores the target, and then allows that observed result into the following target's history. The raw database is never deleted or modified.
 
 - 新增独立「V5.2逐期验证」页面；默认对当前手动导入数据的最近100期逐期回放。若历史截至第1250期，目标区间为第1151—1250期。
 - 每个目标期的特征和拟合只使用该期之前的数据；同时对照V4冻结长期频率模型与均匀随机基准。
