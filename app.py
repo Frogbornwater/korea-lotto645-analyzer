@@ -1371,16 +1371,24 @@ with page_v52:
     st.write("历史回放会对最近N期逐期模拟，每个目标期只使用该期之前的数据重新拟合。前瞻验证会在开奖前锁定V5.1候选与均匀随机对照，开奖后使用手动导入的历史数据评分。")
     st.warning("历史滚动回放属于回溯性研究，不是全新独立测试或未来预测证据。本页不删除任何历史记录，也不会访问韩国彩票官方网站或API。")
 
-    st.markdown("### A. 最近100期逐期历史回放")
-    st.caption("若当前历史截至第1250期，默认回放第1151—1250期；每一期训练都只读取该目标期之前的历史。")
+    st.markdown("### A. 隔离最近100—200期，模拟未来逐期预测")
+    st.caption("所选最近区间会从初始训练截止点之后隔离出来，按时间顺序逐期预测；每期真实号码只在该期预测完成后用于评分，并进入下一期可见历史。原始数据库不会被删除或修改。")
     c1, c2, c3 = st.columns(3)
     with c1:
-        rolling_test_draws = st.selectbox("逐期回放期数", [30, 50, 80, 100], index=3, key="v52_test_draws")
+        rolling_test_draws = st.selectbox("隔离最近多少期作为模拟未来", [100, 150, 200], index=0, key="v52_test_draws")
     with c2:
         rolling_window = st.selectbox("每次模型训练窗口", [250, 300, 400, 500, 700, 900], index=3, key="v52_training_window")
     with c3:
         rolling_alpha = st.select_slider("Ridge正则化强度", options=[0.1, 0.3, 1.0, 3.0, 10.0], value=1.0, key="v52_ridge_alpha")
-    st.caption("每期固定生成10注；同时比较V4冻结长期频率模型和均匀随机基准。")
+    if len(df) > int(rolling_test_draws):
+        _v52_initial_cutoff = int(df.iloc[len(df) - int(rolling_test_draws) - 1]["draw_no"])
+        _v52_sim_start = int(df.iloc[len(df) - int(rolling_test_draws)]["draw_no"])
+        _v52_sim_end = int(df.iloc[-1]["draw_no"])
+        m1, m2, m3 = st.columns(3)
+        m1.metric("初始训练数据截止期", f"第{_v52_initial_cutoff}期")
+        m2.metric("模拟未来起始期", f"第{_v52_sim_start}期")
+        m3.metric("模拟未来结束期", f"第{_v52_sim_end}期")
+    st.caption("每期固定生成10注；同时比较V4冻结长期频率模型和均匀随机基准。训练窗口是每次重新拟合时最多使用的历史训练样本数，不是要从原始数据中删除的期数。")
     if st.button("运行最近区间逐期滚动回放", type="primary", use_container_width=True, key="v52_run_replay"):
         if len(df) < 180 + int(rolling_test_draws):
             st.error(f"当前至少需要{180 + int(rolling_test_draws)}期连续历史数据。")
