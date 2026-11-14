@@ -17,7 +17,7 @@ sys.path.insert(0, _APP_ROOT)
 for _module_name in (
     "backtest_engine", "joint_optimizer", "robust_optimizer", "parameter_optimizer",
     "portfolio_optimizer", "lotto_core", "model_registry", "model_management",
-    "experiment_export", "data_manager", "v40_governance", "v40_store", "v50_predictive_engine", "v50_backtest", "v51_smart_picker", "v52_rolling_validation",
+    "experiment_export", "data_manager", "v40_governance", "v40_store", "v50_predictive_engine", "v50_backtest", "v51_smart_picker", "v52_rolling_validation", "v53_randomized_audit",
 ):
     sys.modules.pop(_module_name, None)
 
@@ -64,6 +64,7 @@ from v40_governance import (
 from v50_predictive_engine import fit_predict_next as v50_fit_predict_next, generate_tickets as v50_generate_tickets, build_v50_forward_lock
 from v51_smart_picker import generate_constrained_tickets as v51_generate_constrained_tickets
 from v52_rolling_validation import build_v51_forward_lock_event, event_tickets_frame, evaluate_v51_forward_lock_events
+from v53_randomized_audit import run_multi_seed_random_audit
 from v50_backtest import run_v50_walk_forward
 from v40_store import (
     EventStoreError, GitHubEventStore, export_event_archive,
@@ -1514,6 +1515,58 @@ with page_v52:
             st.info("尚无已开奖且通过数据指纹核验的V5.1锁定记录。开奖数据仍需手动导入。")
     else:
         st.info("当前会话尚无V5.1锁定事件。请先生成锁定记录，或导入之前保存的锁定档案JSON。")
+
+    st.divider()
+    st.markdown("### D. V5.3 多随机种子对照与实验审计")
+    st.caption("对同一段逐期预测区间运行多组完整随机实验。每个随机实验每期生成与V5相同数量的均匀随机且批内不重复的六号码组合；随机种子由主种子和目标期号确定，可完全复现。")
+    st.warning("本审计只在V5.3格式的逐期回放明细上运行。若旧CSV缺少实际号码和45维概率，请先用新版重新运行回放。")
+    audit_col1, audit_col2 = st.columns(2)
+    with audit_col1:
+        v53_repetitions = st.selectbox("完整随机实验次数", [100, 250, 500, 1000, 2000], index=2, key="v53_random_repetitions")
+    with audit_col2:
+        v53_seed = st.number_input("V5.3主随机种子", min_value=0, max_value=4294967295, value=5302026, step=1, key="v53_master_seed")
+    if st.button("运行V5.3多随机种子审计", type="primary", use_container_width=True, key="v53_run_audit"):
+        if not rolling_result:
+            st.error("请先运行V5.2逐期滚动回放。")
+        else:
+            audit_progress = st.progress(0, text="准备多随机种子对照…")
+            try:
+                def _v53_progress(done, total):
+                    audit_progress.progress(min(1.0, done / max(total, 1)), text=f"随机对照审计：{done}/{total}期")
+                audit = run_multi_seed_random_audit(
+                    rolling_result["detail"],
+                    random_repetitions=int(v53_repetitions),
+                    master_seed=int(v53_seed),
+                    progress_callback=_v53_progress,
+                )
+                st.session_state["v53_random_audit"] = audit
+                st.success(f"V5.3审计完成：{audit['manifest']['random_repetitions']}组完整随机实验，覆盖{audit['manifest']['target_draws']}期。")
+            except Exception as exc:
+                st.error(f"V5.3审计失败：{type(exc).__name__}: {exc}")
+
+    v53_audit = st.session_state.get("v53_random_audit")
+    if v53_audit:
+        st.markdown("#### V5.3审计结果")
+        st.dataframe(v53_audit["summary"].round(6), hide_index=True, use_container_width=True)
+        st.caption("经验p值表示随机完整区间实验中，指标达到或超过V5观察值的比例（加一校正）；Holm校正控制六项票据指标的多重比较。概率Brier和Log Loss与均匀概率基准比较，不使用随机票据分布。")
+        st.markdown("#### 随机实验分布（每一行是一组覆盖完整区间的随机实验）")
+        st.dataframe(v53_audit["random_distribution"].describe().round(6), use_container_width=True)
+        st.download_button(
+            "下载V5.3审计摘要CSV",
+            v53_audit["summary"].to_csv(index=False).encode("utf-8-sig"),
+            "lotto645_v53_random_audit_summary.csv", "text/csv", key="v53_summary_download",
+        )
+        st.download_button(
+            "下载500组随机实验分布CSV",
+            v53_audit["random_distribution"].to_csv(index=False).encode("utf-8-sig"),
+            "lotto645_v53_random_distribution.csv", "text/csv", key="v53_distribution_download",
+        )
+        st.download_button(
+            "下载V5.3审计清单JSON",
+            json.dumps(v53_audit["manifest"], ensure_ascii=False, indent=2),
+            "lotto645_v53_audit_manifest.json", "application/json", key="v53_manifest_download",
+        )
+        st.json(v53_audit["manifest"])
 
 with page_v40:
     st.subheader("V4.0 研究治理与数据中心")
