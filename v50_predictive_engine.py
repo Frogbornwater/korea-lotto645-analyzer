@@ -243,6 +243,10 @@ def _fit_from_feature_cache(
         "training_rows": fitted["training_rows"],
         "training_positive_rate": fitted["training_positive_rate"],
         "ridge_alpha": fitted["ridge_alpha"],
+        # Objective: summed log loss + alpha/2 * ||beta||^2.
+        # Equivalent coefficient when written with mean log loss is alpha/n_rows.
+        "ridge_alpha_mean_loss_equivalent": fitted["ridge_alpha"] / fitted["training_rows"],
+        "ridge_penalty_convention": "sum_log_loss_plus_alpha_over_2_l2; mean_loss_equivalent_alpha_over_n_rows",
         "fit_iterations": fitted["iterations"],
         "feature_coefficients": {
             name: float(value)
