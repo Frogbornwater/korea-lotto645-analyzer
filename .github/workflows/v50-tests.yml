@@ -29,3 +29,5 @@ jobs:
         run: python scripts/v50_robustness_placebo.py
       - name: Run V5.5 Ridge and probability reliability diagnostics
         run: python scripts/v55_ridge_calibration_diagnostics.py
+      - name: Run V5.5 strictly prequential temperature calibration
+        run: python scripts/v55_prequential_temperature_calibration.py
