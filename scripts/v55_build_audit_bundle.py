@@ -33,8 +33,8 @@ def build_forward_lock(frame: pd.DataFrame) -> dict:
     clean=validate_frame(frame).reset_index(drop=True)
     draws=clean["draw_no"].to_numpy(dtype=int)
     matrix=clean[NUMBER_COLS].to_numpy(dtype=np.int16,copy=True)
-    if len(clean)<MIN_HISTORY+CALIBRATION_DRAWS:
-        raise ValueError("历史数据不足，无法生成温度校准锁定。")
+    if len(clean)<MIN_HISTORY+30+CALIBRATION_DRAWS:
+        raise ValueError(f"历史数据至少需要{MIN_HISTORY+30+CALIBRATION_DRAWS}期，才能为校准区间提供30期以上训练样本。")
     if np.any(np.diff(draws)!=1):
         raise ValueError("期号不连续，拒绝生成前瞻锁定。")
     start=len(clean)-CALIBRATION_DRAWS
