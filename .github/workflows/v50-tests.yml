@@ -27,10 +27,12 @@ jobs:
         run: python scripts/v50_feature_ablation.py
       - name: Run V5 robustness and placebo diagnostics
         run: python scripts/v50_robustness_placebo.py
+      - name: Prepare V5.5 report directory
+        run: mkdir -p artifacts/v55
       - name: Run V5.5 Ridge and probability reliability diagnostics
-        run: python scripts/v55_ridge_calibration_diagnostics.py
+        run: python scripts/v55_ridge_calibration_diagnostics.py > artifacts/v55/ridge_reliability_report.json
       - name: Run V5.5 strictly prequential temperature calibration
-        run: python scripts/v55_prequential_temperature_calibration.py
+        run: python scripts/v55_prequential_temperature_calibration.py > artifacts/v55/temperature_retrospective_report.json
       - name: Build V5.5 audit bundle and frozen forward lock
         run: python scripts/v55_build_audit_bundle.py
       - name: Upload V5.5 audit bundle
