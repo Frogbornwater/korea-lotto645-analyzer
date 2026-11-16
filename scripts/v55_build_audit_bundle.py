@@ -71,8 +71,10 @@ def write_json(path: Path, value: dict) -> None:
 def main():
     OUT.mkdir(parents=True,exist_ok=True)
     history=pd.read_csv(ROOT/"data"/"lotto645.csv")
-    ridge=run_diagnostics(history)
-    temp=run_experiment(history)
+    ridge_path=OUT/"ridge_reliability_report.json"
+    temp_path=OUT/"temperature_retrospective_report.json"
+    ridge=json.loads(ridge_path.read_text(encoding="utf-8")) if ridge_path.exists() else run_diagnostics(history)
+    temp=json.loads(temp_path.read_text(encoding="utf-8")) if temp_path.exists() else run_experiment(history)
     lock=build_forward_lock(history)
     write_json(OUT/"ridge_reliability_report.json",ridge)
     write_json(OUT/"temperature_retrospective_report.json",temp)
