@@ -10,7 +10,7 @@ import pandas as pd
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from experiment_export import build_research_bundle
+from experiment_export import build_research_bundle, restore_v54_research_bundle
 from model_management import new_project_state
 
 
@@ -133,6 +133,63 @@ class ExperimentExportTests(unittest.TestCase):
         payload, manifest = build_research_bundle(history, {}, "manual", {}, None)
         self.assertTrue(payload.startswith(b"PK"))
         self.assertGreaterEqual(len(manifest["unavailable_or_empty_artifacts"]), 10)
+
+
+    def test_v54_round_trip_restores_v52_v53_and_checks_hashes(self):
+        history = sample_history()
+        detail = pd.DataFrame([{
+            "目标期号": 25, "训练结束期": 24, "V5_Brier": 0.12,
+            "V5_LogLoss": 0.42, "V5号码概率": "[0.1, 0.2]",
+        }])
+        summary = pd.DataFrame([{"指标": "V5_mean_hits", "观察值": 0.8}])
+        distribution = pd.DataFrame([{"实验编号": 1, "mean_hits": 0.7}])
+        seeds = pd.DataFrame([{"目标期号": 25, "seed": 12345}])
+        session = {
+            "v52_replay_detail": detail,
+            "v52_replay_summary": summary,
+            "v52_replay_metadata": {
+                "test_start_draw": 25, "test_end_draw": 25, "test_draws": 1,
+                "training_window": 500, "ridge_alpha": 1.0,
+                "elapsed_seconds": 1.2, "engine_version": "test",
+            },
+            "v53_audit_summary": summary,
+            "v53_random_distribution": distribution,
+            "v53_rng_seed_records": seeds,
+            "v53_audit_manifest": {"random_repetitions": 1, "target_draws": 1},
+        }
+        payload, manifest = build_research_bundle(
+            history, {"rows": len(history)}, "manual upload", session, None, True,
+        )
+        restored = restore_v54_research_bundle(payload)
+        self.assertEqual(len(restored["v52_replay_detail"]), 1)
+        self.assertEqual(len(restored["v53_random_distribution"]), 1)
+        self.assertEqual(len(restored["v53_rng_seed_records"]), 1)
+        self.assertEqual(restored["v52_rolling_result"]["training_window"], 500)
+        self.assertIn("artifact_sha256", manifest)
+
+    def test_v54_restore_rejects_tampered_archive(self):
+        history = sample_history()
+        session = {
+            "v52_replay_detail": pd.DataFrame([{"目标期号": 25}]),
+            "v52_replay_summary": pd.DataFrame([{"指标": "x"}]),
+            "v52_replay_metadata": {
+                "test_start_draw": 25, "test_end_draw": 25, "test_draws": 1,
+                "training_window": 500, "ridge_alpha": 1.0, "elapsed_seconds": 1.0,
+            },
+        }
+        payload, _ = build_research_bundle(
+            history, {}, "manual", session, None, True,
+        )
+        source = zipfile.ZipFile(BytesIO(payload), "r")
+        output = BytesIO()
+        with source, zipfile.ZipFile(output, "w", zipfile.ZIP_DEFLATED) as target:
+            for name in source.namelist():
+                data = source.read(name)
+                if name == "v52_rolling_replay/rolling_replay_detail.csv":
+                    data += b"tampered"
+                target.writestr(name, data)
+        with self.assertRaisesRegex(ValueError, "完整性校验失败"):
+            restore_v54_research_bundle(output.getvalue())
 
 
 if __name__ == "__main__":

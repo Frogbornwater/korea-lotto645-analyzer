@@ -15,7 +15,7 @@ from typing import Any, Mapping
 
 import pandas as pd
 
-EXPORT_SCHEMA_VERSION = 1
+EXPORT_SCHEMA_VERSION = 2
 ENGINE_VERSION = "4.0.0-governed"
 
 # Session-state key -> folder / file stem / artifact type.
@@ -36,6 +36,15 @@ _ARTIFACTS = {
     "v361_portfolio": ("portfolio", "optimized_10_tickets.csv", "dataframe"),
     "v361_portfolio_report": ("portfolio", "portfolio_quality_report.json", "json"),
     "v36_candidates": ("candidate_generation", "generated_candidates.csv", "dataframe"),
+    # V5.2 rolling replay: full row-level detail, summary and reproducibility metadata.
+    "v52_replay_detail": ("v52_rolling_replay", "rolling_replay_detail.csv", "dataframe"),
+    "v52_replay_summary": ("v52_rolling_replay", "rolling_replay_summary.csv", "dataframe"),
+    "v52_replay_metadata": ("v52_rolling_replay", "rolling_replay_metadata.json", "json"),
+    # V5.3 Monte Carlo audit: retain every replicate, per-draw RNG stream and manifest.
+    "v53_audit_summary": ("v53_random_audit", "audit_summary.csv", "dataframe"),
+    "v53_random_distribution": ("v53_random_audit", "random_experiment_distribution.csv", "dataframe"),
+    "v53_rng_seed_records": ("v53_random_audit", "per_draw_rng_seeds.csv", "dataframe"),
+    "v53_audit_manifest": ("v53_random_audit", "audit_manifest.json", "json"),
 }
 
 
@@ -235,12 +244,18 @@ def build_research_bundle(
             "unavailable_or_empty_artifacts": missing,
             "notes": [
                 "This bundle contains only allow-listed current-session research artifacts.",
+                "V5.2 rolling replay and V5.3 randomized audit detail, seed records and manifests are included when present.",
                 "V3.7 joint-result DataFrames and metadata are explicitly exported when present.",
                 "V3.8 predictive ranking and portfolio-structure ranking are separate objectives.",
                 "A missing artifact means it was not generated or is not present in this Streamlit session.",
                 "Parameter-search rankings are exploratory and are not proof of predictive advantage.",
                 "The historical draws are manually supplied by the user; no official lottery website was accessed.",
             ],
+        }
+        # Hash every payload member so an imported archive can be integrity-checked.
+        manifest["artifact_sha256"] = {
+            name: hashlib.sha256(zf.read(name)).hexdigest()
+            for name in included
         }
         # The manifest lists itself and the explanatory README as bundle members.
         included.extend(["manifest.json", "README_CN.txt"])
@@ -250,7 +265,7 @@ def build_research_bundle(
             "README_CN.txt",
             (
                 "Lotto 6/45 研究实验包\n\n"
-                "本压缩包用于审查当前 Streamlit 会话中的回测、V3.7联合优化、V3.8稳健研究、前瞻锁定和模型档案。\n"
+                "本压缩包用于审查当前 Streamlit 会话中的回测、V3.7/V3.8研究、V5.2逐期回放、V5.3随机审计、前瞻锁定和模型档案。\n"
                 "manifest.json 列出实际包含的文件及未生成的文件。\n\n"
                 "数据规则：仅使用用户手动导入的 CSV/Excel；不连接韩国 Lotto 官网、API 或抓取服务。\n"
                 "请注意：参数搜索第一名属于探索性结果，不代表统计显著或未来预测能力。\n"
@@ -258,3 +273,68 @@ def build_research_bundle(
         )
 
     return output.getvalue(), manifest
+
+
+def restore_v54_research_bundle(payload: bytes) -> dict[str, Any]:
+    """Validate a V5.4 ZIP and restore only the allow-listed V5.2/V5.3 research artifacts."""
+    if not isinstance(payload, (bytes, bytearray)) or not payload:
+        raise ValueError("归档文件为空。")
+    if len(payload) > 100 * 1024 * 1024:
+        raise ValueError("归档文件超过100MB安全上限。")
+    try:
+        archive = zipfile.ZipFile(io.BytesIO(payload), "r")
+    except zipfile.BadZipFile as exc:
+        raise ValueError("文件不是有效的ZIP实验归档。") from exc
+    with archive:
+        names = set(archive.namelist())
+        if "manifest.json" not in names:
+            raise ValueError("归档缺少manifest.json。")
+        manifest = json.loads(archive.read("manifest.json").decode("utf-8"))
+        if int(manifest.get("export_schema_version", 0)) < 2:
+            raise ValueError("归档版本过旧或不支持；请使用V5.4导出的完整ZIP。")
+        if manifest.get("network_policy") != "no_lottery_official_site_api_scraping_or_external_draw_fetching":
+            raise ValueError("归档数据政策标识不匹配，已拒绝导入。")
+        hashes = manifest.get("artifact_sha256")
+        if not isinstance(hashes, dict):
+            raise ValueError("归档缺少文件完整性校验清单。")
+        for name, expected in hashes.items():
+            if name not in names or name.startswith("/") or ".." in name.split("/"):
+                raise ValueError(f"归档文件路径无效或缺失：{name}")
+            actual = hashlib.sha256(archive.read(name)).hexdigest()
+            if actual != expected:
+                raise ValueError(f"文件完整性校验失败：{name}")
+        restored: dict[str, Any] = {"manifest": manifest}
+        csv_map = {
+            "v52_replay_detail": "v52_rolling_replay/rolling_replay_detail.csv",
+            "v52_replay_summary": "v52_rolling_replay/rolling_replay_summary.csv",
+            "v53_audit_summary": "v53_random_audit/audit_summary.csv",
+            "v53_random_distribution": "v53_random_audit/random_experiment_distribution.csv",
+            "v53_rng_seed_records": "v53_random_audit/per_draw_rng_seeds.csv",
+        }
+        json_map = {
+            "v52_replay_metadata": "v52_rolling_replay/rolling_replay_metadata.json",
+            "v53_audit_manifest": "v53_random_audit/audit_manifest.json",
+        }
+        for key, path in csv_map.items():
+            if path in names:
+                restored[key] = pd.read_csv(io.BytesIO(archive.read(path)))
+        for key, path in json_map.items():
+            if path in names:
+                restored[key] = json.loads(archive.read(path).decode("utf-8"))
+        required = {"v52_replay_detail", "v52_replay_summary", "v52_replay_metadata"}
+        if not required.issubset(restored):
+            raise ValueError("归档未包含完整的V5.2逐期回放明细、摘要和元数据。")
+        metadata = restored["v52_replay_metadata"]
+        restored["v52_rolling_result"] = {
+            **metadata,
+            "detail": restored["v52_replay_detail"],
+            "summary": restored["v52_replay_summary"],
+        }
+        if {"v53_audit_summary", "v53_random_distribution", "v53_rng_seed_records", "v53_audit_manifest"}.issubset(restored):
+            restored["v53_random_audit"] = {
+                "summary": restored["v53_audit_summary"],
+                "random_distribution": restored["v53_random_distribution"],
+                "rng_seed_records": restored["v53_rng_seed_records"],
+                "manifest": restored["v53_audit_manifest"],
+            }
+        return restored
