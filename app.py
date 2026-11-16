@@ -1409,7 +1409,22 @@ with page_v52:
                 )
                 result["research_label"] = "retrospective_exploratory_only"
                 st.session_state["v52_rolling_result"] = result
-                st.success(f"逐期回放完成：第{result['test_start_draw']}—{result['test_end_draw']}期，共{result['test_draws']}期，耗时{result['elapsed_seconds']:.1f}秒。")
+                st.session_state["v52_replay_detail"] = result["detail"]
+                st.session_state["v52_replay_summary"] = result["summary"]
+                st.session_state["v52_replay_metadata"] = {
+                    "engine_version": result.get("engine_version"),
+                    "data_fingerprint_sha256": result.get("data_fingerprint_sha256"),
+                    "evidence_status": result.get("evidence_status"),
+                    "interpretation": result.get("interpretation"),
+                    "test_start_draw": int(result["test_start_draw"]),
+                    "test_end_draw": int(result["test_end_draw"]),
+                    "test_draws": int(result["test_draws"]),
+                    "training_window": int(result["training_window"]),
+                    "ridge_alpha": float(result["ridge_alpha"]),
+                    "elapsed_seconds": float(result["elapsed_seconds"]),
+                    "research_label": result.get("research_label", "retrospective_exploratory_only"),
+                }
+                st.success(f"逐期回放完成：第{result['test_start_draw']}—{result['test_end_draw']}期，共{result['test_draws']}期，耗时{result['elapsed_seconds']:.1f}秒。请在本页D区下载完整实验归档ZIP。")
             except Exception as exc:
                 st.error(f"逐期滚动回放失败：{type(exc).__name__}: {exc}")
 
@@ -1540,7 +1555,11 @@ with page_v52:
                     progress_callback=_v53_progress,
                 )
                 st.session_state["v53_random_audit"] = audit
-                st.success(f"V5.3审计完成：{audit['manifest']['random_repetitions']}组完整随机实验，覆盖{audit['manifest']['target_draws']}期。")
+                st.session_state["v53_audit_summary"] = audit["summary"]
+                st.session_state["v53_random_distribution"] = audit["random_distribution"]
+                st.session_state["v53_rng_seed_records"] = audit["rng_seed_records"]
+                st.session_state["v53_audit_manifest"] = audit["manifest"]
+                st.success(f"V5.3审计完成：{audit['manifest']['random_repetitions']}组完整随机实验，覆盖{audit['manifest']['target_draws']}期。实验结果已加入本次会话的归档清单，请下载ZIP长期保存。")
             except Exception as exc:
                 st.error(f"V5.3审计失败：{type(exc).__name__}: {exc}")
 
@@ -1567,6 +1586,31 @@ with page_v52:
             "lotto645_v53_audit_manifest.json", "application/json", key="v53_manifest_download",
         )
         st.json(v53_audit["manifest"])
+
+    st.divider()
+    st.markdown("### E. V5.4 完整实验归档与恢复")
+    st.caption("将当前会话中已有的逐期回放、V5.3随机分布、随机流种子和审计清单打包。ZIP必须下载到本地保存；关闭浏览器或会话后，内存结果不保证保留。")
+    try:
+        _v54_bundle, _v54_manifest = build_research_bundle(
+            df, quality, data_source, st.session_state,
+            st.session_state.get("v36_project_state"), include_history=True,
+        )
+        st.download_button(
+            "下载V5.4完整实验归档ZIP",
+            _v54_bundle,
+            f"lotto645_v54_research_archive_{quality['last_draw']}.zip",
+            "application/zip",
+            key="v54_research_bundle_download",
+            use_container_width=True,
+        )
+        st.caption(
+            f"归档包含 {len(_v54_manifest['included_artifacts'])} 个文件；"
+            f"未生成或当前会话缺失的项目：{len(_v54_manifest['unavailable_or_empty_artifacts'])} 项。"
+        )
+        with st.expander("查看归档清单"):
+            st.json(_v54_manifest)
+    except Exception as exc:
+        st.error(f"生成实验归档失败：{type(exc).__name__}: {exc}")
 
 with page_v40:
     st.subheader("V4.0 研究治理与数据中心")
