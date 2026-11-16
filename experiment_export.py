@@ -15,7 +15,7 @@ from typing import Any, Mapping
 
 import pandas as pd
 
-EXPORT_SCHEMA_VERSION = 1
+EXPORT_SCHEMA_VERSION = 2
 ENGINE_VERSION = "4.0.0-governed"
 
 # Session-state key -> folder / file stem / artifact type.
@@ -36,6 +36,15 @@ _ARTIFACTS = {
     "v361_portfolio": ("portfolio", "optimized_10_tickets.csv", "dataframe"),
     "v361_portfolio_report": ("portfolio", "portfolio_quality_report.json", "json"),
     "v36_candidates": ("candidate_generation", "generated_candidates.csv", "dataframe"),
+    # V5.2 rolling replay: full row-level detail, summary and reproducibility metadata.
+    "v52_replay_detail": ("v52_rolling_replay", "rolling_replay_detail.csv", "dataframe"),
+    "v52_replay_summary": ("v52_rolling_replay", "rolling_replay_summary.csv", "dataframe"),
+    "v52_replay_metadata": ("v52_rolling_replay", "rolling_replay_metadata.json", "json"),
+    # V5.3 Monte Carlo audit: retain every replicate, per-draw RNG stream and manifest.
+    "v53_audit_summary": ("v53_random_audit", "audit_summary.csv", "dataframe"),
+    "v53_random_distribution": ("v53_random_audit", "random_experiment_distribution.csv", "dataframe"),
+    "v53_rng_seed_records": ("v53_random_audit", "per_draw_rng_seeds.csv", "dataframe"),
+    "v53_audit_manifest": ("v53_random_audit", "audit_manifest.json", "json"),
 }
 
 
@@ -235,6 +244,7 @@ def build_research_bundle(
             "unavailable_or_empty_artifacts": missing,
             "notes": [
                 "This bundle contains only allow-listed current-session research artifacts.",
+                "V5.2 rolling replay and V5.3 randomized audit detail, seed records and manifests are included when present.",
                 "V3.7 joint-result DataFrames and metadata are explicitly exported when present.",
                 "V3.8 predictive ranking and portfolio-structure ranking are separate objectives.",
                 "A missing artifact means it was not generated or is not present in this Streamlit session.",
@@ -250,7 +260,7 @@ def build_research_bundle(
             "README_CN.txt",
             (
                 "Lotto 6/45 研究实验包\n\n"
-                "本压缩包用于审查当前 Streamlit 会话中的回测、V3.7联合优化、V3.8稳健研究、前瞻锁定和模型档案。\n"
+                "本压缩包用于审查当前 Streamlit 会话中的回测、V3.7/V3.8研究、V5.2逐期回放、V5.3随机审计、前瞻锁定和模型档案。\n"
                 "manifest.json 列出实际包含的文件及未生成的文件。\n\n"
                 "数据规则：仅使用用户手动导入的 CSV/Excel；不连接韩国 Lotto 官网、API 或抓取服务。\n"
                 "请注意：参数搜索第一名属于探索性结果，不代表统计显著或未来预测能力。\n"
