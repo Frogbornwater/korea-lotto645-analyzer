@@ -96,5 +96,30 @@ class V50PredictiveEngineTests(unittest.TestCase):
         )
 
 
+    def test_pair_feature_and_sampling_ablations_are_independent(self):
+        frame = synthetic_history(85)
+        pair_exclusions = ("pair_mean_log_lift", "pair_sd_log_lift")
+        common = dict(
+            frame=frame, test_draws=2, training_window=45, min_history=30,
+            tickets_per_draw=3, seed=123, bootstrap_reps=100,
+        )
+        # A: both off; B: feature on, sampling off;
+        # C: feature off, sampling on; D: both on.
+        a = run_v50_walk_forward(**common, feature_exclusions=pair_exclusions, pair_sampling_strength=0.0)
+        b = run_v50_walk_forward(**common, pair_sampling_strength=0.0)
+        c = run_v50_walk_forward(**common, feature_exclusions=pair_exclusions, pair_sampling_strength=0.5)
+        d = run_v50_walk_forward(**common, pair_sampling_strength=0.5)
+        self.assertTrue(np.allclose(a["detail"]["V5_45号码概率_JSON"].map(lambda s: np.asarray(__import__("json").loads(s))).tolist(),
+                                    c["detail"]["V5_45号码概率_JSON"].map(lambda s: np.asarray(__import__("json").loads(s))).tolist()))
+        self.assertTrue(np.allclose(b["detail"]["V5_45号码概率_JSON"].map(lambda s: np.asarray(__import__("json").loads(s))).tolist(),
+                                    d["detail"]["V5_45号码概率_JSON"].map(lambda s: np.asarray(__import__("json").loads(s))).tolist()))
+        self.assertEqual(a["detail"]["V5_抽样共现强度"].tolist(), [0.0, 0.0])
+        self.assertEqual(b["detail"]["V5_抽样共现强度"].tolist(), [0.0, 0.0])
+        self.assertEqual(c["detail"]["V5_抽样共现强度"].tolist(), [0.5, 0.5])
+        self.assertEqual(d["detail"]["V5_抽样共现强度"].tolist(), [0.5, 0.5])
+        self.assertEqual(a["pair_sampling_strength"], 0.0)
+        self.assertEqual(d["pair_sampling_strength"], 0.5)
+
+
 if __name__ == "__main__":
     unittest.main()
