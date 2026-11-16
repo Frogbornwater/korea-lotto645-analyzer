@@ -68,8 +68,14 @@ def run_v50_walk_forward(
     progress_callback: Callable[[int, int], None] | None = None,
     feature_exclusions: tuple[str, ...] = (),
     placebo_seed: int | None = None,
+    pair_sampling_strength: float | None = None,
 ) -> dict[str, Any]:
-    """Evaluate one-step-ahead predictions, training each target from past only."""
+    """Evaluate one-step-ahead predictions, training each target from past only.
+
+    pair_sampling_strength independently controls ticket-level pair adjustment.
+    None preserves legacy behavior (pair-feature ablation also disables pair sampling);
+    explicit 0.0..2.0 separates probability-feature and ticket-sampling ablations.
+    """
     started = time.perf_counter()
     clean = validate_frame(frame).reset_index(drop=True)
     if clean.empty:
@@ -87,6 +93,8 @@ def run_v50_walk_forward(
         raise ValueError("测试期数必须为正数，每期每模型注数必须为1—20。")
     if not 30 <= min_history < n or not 30 <= training_window <= 1000:
         raise ValueError("min_history或training_window超出允许范围。")
+    if pair_sampling_strength is not None and not 0.0 <= float(pair_sampling_strength) <= 2.0:
+        raise ValueError("pair_sampling_strength必须位于0—2。")
     start_idx = max(min_history, n - min(test_draws, n - min_history))
     if start_idx >= n:
         raise ValueError("可用样本外测试期数不足。")
@@ -108,9 +116,13 @@ def run_v50_walk_forward(
         actual = set(int(x) for x in matrix[target_idx])
         target_seed = int(np.random.SeedSequence([int(seed), target_draw]).generate_state(1)[0])
         pair_ablation = {"pair_mean_log_lift", "pair_sd_log_lift"}.intersection(feature_exclusions)
+        effective_pair_strength = (
+            (0.0 if pair_ablation else 0.5)
+            if pair_sampling_strength is None else float(pair_sampling_strength)
+        )
         model_tickets = generate_tickets(
             probabilities, pair_scores, tickets_per_draw, target_seed,
-            pair_strength=0.0 if pair_ablation else 0.5
+            pair_strength=effective_pair_strength
         )
         v4_probabilities = _v4_long_frequency_probabilities(matrix[:target_idx], 174.941214)
         v4_tickets = generate_tickets(
@@ -138,6 +150,7 @@ def run_v50_walk_forward(
             "随机_Brier": random_brier,
             "随机_LogLoss": random_log_loss,
             "V5_概率和": float(probabilities.sum()),
+            "V5_抽样共现强度": float(effective_pair_strength),
             "V4_概率和": float(v4_probabilities.sum()),
             "实际主号码": json.dumps(sorted(actual), ensure_ascii=False),
             "V5_45号码概率_JSON": json.dumps([float(x) for x in probabilities], ensure_ascii=False, separators=(",", ":")),
@@ -229,6 +242,8 @@ def run_v50_walk_forward(
         "min_history": min_history,
         "ridge_alpha": float(ridge_alpha),
         "feature_exclusions": list(feature_exclusions),
+        "pair_sampling_strength": pair_sampling_strength,
+        "pair_sampling_strength_legacy_default": pair_sampling_strength is None,
         "label_placebo": placebo_seed is not None,
         "placebo_seed": placebo_seed,
         "tickets_per_draw": tickets_per_draw,
