@@ -66,7 +66,7 @@ def build_forward_lock(frame: pd.DataFrame) -> dict:
     }
 
 def write_json(path: Path, value: dict) -> None:
-    path.write_text(json.dumps(value,ensure_ascii=False,indent=2,allow_nan=False)+"\\n",encoding="utf-8")
+    path.write_text(json.dumps(value,ensure_ascii=False,indent=2,allow_nan=False)+"\n",encoding="utf-8")
 
 def main():
     OUT.mkdir(parents=True,exist_ok=True)
