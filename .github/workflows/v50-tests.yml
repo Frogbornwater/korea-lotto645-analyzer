@@ -27,3 +27,5 @@ jobs:
         run: python scripts/v50_feature_ablation.py
       - name: Run V5 robustness and placebo diagnostics
         run: python scripts/v50_robustness_placebo.py
+      - name: Run V5.5 Ridge and probability reliability diagnostics
+        run: python scripts/v55_ridge_calibration_diagnostics.py
