@@ -47,7 +47,7 @@ from model_management import (
     MODEL_STATUSES, add_experiment, change_model_status, export_project_state,
     import_project_state, new_project_state,
 )
-from experiment_export import build_research_bundle
+from experiment_export import build_research_bundle, restore_v54_research_bundle
 from data_manager import load_repository_history, read_manual_upload
 from lotto_core import (
     COLUMNS, MODEL_NAMES, compare_ticket_to_history, draw_features, frequency_table,
@@ -1590,6 +1590,21 @@ with page_v52:
     st.divider()
     st.markdown("### E. V5.4 完整实验归档与恢复")
     st.caption("将当前会话中已有的逐期回放、V5.3随机分布、随机流种子和审计清单打包。ZIP必须下载到本地保存；关闭浏览器或会话后，内存结果不保证保留。")
+    _v54_upload = st.file_uploader("导入此前保存的V5.4完整实验归档ZIP", type=["zip"], key="v54_archive_upload")
+    if _v54_upload is not None and st.button("校验并恢复V5.2/V5.3实验结果", key="v54_restore_archive"):
+        try:
+            _v54_restored = restore_v54_research_bundle(_v54_upload.getvalue())
+            for _v54_key in (
+                "v52_replay_detail", "v52_replay_summary", "v52_replay_metadata",
+                "v52_rolling_result", "v53_audit_summary", "v53_random_distribution",
+                "v53_rng_seed_records", "v53_audit_manifest", "v53_random_audit",
+            ):
+                if _v54_key in _v54_restored:
+                    st.session_state[_v54_key] = _v54_restored[_v54_key]
+            st.success("归档完整性校验通过，V5.2逐期回放及归档中存在的V5.3审计结果已恢复到当前会话。")
+            st.rerun()
+        except Exception as exc:
+            st.error(f"归档恢复失败：{type(exc).__name__}: {exc}")
     try:
         _v54_bundle, _v54_manifest = build_research_bundle(
             df, quality, data_source, st.session_state,
