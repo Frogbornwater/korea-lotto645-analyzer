@@ -2,7 +2,7 @@ name: V5.0 predictive engine tests
 
 on:
   push:
-    branches: ["v5.0-predictive-engine"]
+    branches: ["main", "v5.0-predictive-engine"]
   pull_request:
     branches: ["main"]
 
@@ -31,3 +31,12 @@ jobs:
         run: python scripts/v55_ridge_calibration_diagnostics.py
       - name: Run V5.5 strictly prequential temperature calibration
         run: python scripts/v55_prequential_temperature_calibration.py
+      - name: Build V5.5 audit bundle and frozen forward lock
+        run: python scripts/v55_build_audit_bundle.py
+      - name: Upload V5.5 audit bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: v55-audit-bundle
+          path: artifacts/v55/
+          if-no-files-found: error
+          retention-days: 90
