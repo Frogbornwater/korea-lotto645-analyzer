@@ -411,7 +411,7 @@ def run_research(frame: pd.DataFrame) -> dict:
             "所有数据只来自仓库内用户手动维护的CSV；本研究不访问任何外部开奖网站或API。",
         ],
     }
-    (out / "v73_recent500_research_report.json").write_text(
+    (out / "v73_recent800_research_report.json").write_text(
         json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8"
     )
     print(json.dumps(report, ensure_ascii=False, indent=2))
