@@ -30,7 +30,7 @@ class V70SignalIntegrityTests(unittest.TestCase):
     def test_metrics_reject_bad_probability_vector(self):
         import json
         row = {
-            "V5_45号码概率_JSON": json.dumps([1.0 / 45.0] * 45),
+            "V5_45号码概率_JSON": json.dumps([6.0 / 45.0] * 45),
             "实际主号码": json.dumps([1, 2, 3, 4, 5, 6]),
             "V5_Brier": 0.1,
             "V5_LogLoss": 0.3,
