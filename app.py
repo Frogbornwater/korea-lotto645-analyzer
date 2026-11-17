@@ -64,6 +64,7 @@ from v40_governance import (
 from v50_predictive_engine import fit_predict_next as v50_fit_predict_next, generate_tickets as v50_generate_tickets, build_v50_forward_lock
 from v51_smart_picker import generate_constrained_tickets as v51_generate_constrained_tickets
 from v52_rolling_validation import build_v51_forward_lock_event, event_tickets_frame, evaluate_v51_forward_lock_events
+from v77_prospective_evidence import build_v77_evidence_report
 from forward_lock_commitment import (
     merge_events_with_1251_commitment,
     verify_1251_archive_bytes,
@@ -1566,6 +1567,51 @@ if show_legacy_tools:
             st.markdown("#### 前瞻锁定状态")
             if not forward_status.empty:
                 st.dataframe(forward_status, hide_index=True, use_container_width=True)
+            v77_report, v77_per_draw, v77_metric_table = build_v77_evidence_report(
+                forward_summary, lock_events=events
+            )
+            st.markdown("#### V7.7 固定前瞻证据累计（1251—1300期）")
+            st.caption(
+                "固定50期观察段；主要终点为每注平均命中数相对同期开奖随机对照的差值。"
+                "观察段完成前只展示描述性结果，不提前作显著性判断。"
+            )
+            st.write({
+                "协议": v77_report["protocol_id"],
+                "状态": v77_report["status"],
+                "已评分且唯一目标期": f'{v77_report["scored_unique_draws"]}/{v77_report["planned_draws"]}',
+                "尚缺期号": v77_report["missing_draws"],
+                "重复锁定期号（已排除）": v77_report["duplicate_draws_excluded"],
+            })
+            if v77_report["analysis_ready"]:
+                st.success("1251—1300期固定观察段已完整，已生成一次性主要终点区间。")
+            elif v77_report["duplicate_draws_excluded"]:
+                st.error("检测到同一期存在多份锁定记录。相关目标期已全部排除；不得挑选其中表现最好的一份。")
+            else:
+                st.info("仍在收集前瞻结果。完成全部50个目标期后，才会生成主要终点的确认性区间。")
+            if not v77_metric_table.empty:
+                st.dataframe(v77_metric_table.round(6), hide_index=True, use_container_width=True)
+            if not v77_per_draw.empty:
+                with st.expander("查看V7.7逐期累计明细"):
+                    st.dataframe(v77_per_draw.round(6), hide_index=True, use_container_width=True)
+            st.download_button(
+                "下载V7.7前瞻证据报告JSON",
+                json.dumps(v77_report, ensure_ascii=False, indent=2).encode("utf-8-sig"),
+                "lotto645_v77_forward_evidence_1251_1300.json",
+                "application/json",
+                key="v77_forward_evidence_json_download",
+            )
+            v77_lock_events = [
+                event for event in events
+                if isinstance(event, dict) and event.get("event_type") == "v51_forward_lock"
+            ]
+            if v77_lock_events:
+                st.download_button(
+                    "下载全部V5.1前瞻锁定事件JSON备份",
+                    export_event_archive(v77_lock_events),
+                    "lotto645_v51_all_forward_locks.json",
+                    "application/json",
+                    key="v77_all_forward_locks_download",
+                )
             if not forward_summary.empty:
                 st.markdown("#### 已开奖预测复盘")
                 st.dataframe(forward_summary.round(6), hide_index=True, use_container_width=True)
