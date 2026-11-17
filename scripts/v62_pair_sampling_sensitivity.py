@@ -73,7 +73,7 @@ def main() -> None:
                     ridge_alpha=RIDGE_ALPHA,
                     tickets_per_draw=TICKETS_PER_DRAW,
                     seed=seed,
-                    bootstrap_reps=0,
+                    bootstrap_reps=100,
                     pair_sampling_strength=strength,
                 )
                 if (result["test_start_draw"], result["test_end_draw"], result["test_draws"]) != (start, end, FOLD_SIZE):
