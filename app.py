@@ -1961,6 +1961,16 @@ with page_v55:
                 df, training_window=int(lock_training_window),
                 min_history=180, ridge_alpha=float(lock_alpha)
             )
+            existing_target_locks = [
+                item for item in st.session_state.get("v55_forward_events", [])
+                if item.get("event_type") == "v51_forward_lock"
+                and int(item.get("payload", {}).get("metadata", {}).get("target_draw", -1)) == int(prediction["target_draw"])
+            ]
+            if existing_target_locks:
+                raise ValueError(
+                    f"第{prediction['target_draw']}期已经存在前瞻锁定。"
+                    "为避免同一期反复试种子、挑选有利结果，请先使用现有锁定；不能为同一期追加第二份锁。"
+                )
             probability_vector = (
                 prediction["number_probabilities"].sort_values("号码")["预测入选概率"].to_numpy(dtype=float)
             )
