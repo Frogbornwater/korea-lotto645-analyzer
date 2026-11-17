@@ -378,7 +378,7 @@ def run_research(frame: pd.DataFrame) -> dict:
     candidate_summary.to_csv(out / "v74_candidate_summary.csv", index=False, encoding="utf-8-sig")
     fingerprint = hashlib.sha256(history.to_csv(index=False).encode("utf-8")).hexdigest()
     report = {
-        "experiment": "V7.4 recent-800 expanding prequential hyperparameter study",
+        "experiment": "V7.4 recent-1000 expanding prequential hyperparameter study",
         "status": "historical_research_screen_not_independent_or_prospective_evidence",
         "manual_history_range": [int(draws[0]), int(draws[-1])],
         "history_rows": int(len(history)),
