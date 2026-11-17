@@ -199,20 +199,41 @@ def evaluate_v51_forward_lock_events(
             "锁定时历史末期": history_last,
             "数据指纹前缀": str(metadata.get("history_fingerprint_sha256", ""))[:12],
         }
-        if target_draw <= history_last:
-            status_rows.append({**base_status, "状态": "无效：目标期必须晚于锁定历史末期"})
+        if target_draw != history_last + 1:
+            status_rows.append({**base_status, "状态": "无效：目标期必须紧接锁定历史末期"})
             continue
-        if target_draw not in draw_map:
-            status_rows.append({**base_status, "状态": "等待开奖数据"})
+        expected_fingerprint = str(metadata.get("history_fingerprint_sha256", ""))
+        if event.get("data_fingerprint_sha256") != expected_fingerprint:
+            status_rows.append({**base_status, "状态": "拒绝评分：事件指纹与锁定元数据不一致"})
+            continue
+        if current_last < history_last:
+            status_rows.append({**base_status, "状态": "等待锁定历史数据：当前数据尚未覆盖锁定历史末期"})
             continue
 
+        # Verify the frozen historical prefix immediately, even before the
+        # target result is imported. A pending lock must not hide a changed
+        # or incomplete training history.
         prefix = clean[clean["draw_no"] <= history_last].copy()
         try:
             prefix_fingerprint = data_fingerprint(prefix)
         except ValueError:
             prefix_fingerprint = ""
-        if prefix_fingerprint != metadata.get("history_fingerprint_sha256"):
-            status_rows.append({**base_status, "状态": "拒绝评分：锁定时历史前缀指纹不匹配"})
+        expected_rows = metadata.get("history_rows")
+        expected_first = metadata.get("history_first_draw")
+        prefix_complete = (
+            not prefix.empty
+            and (expected_rows is None or len(prefix) == int(expected_rows))
+            and (expected_first is None or int(prefix["draw_no"].iloc[0]) == int(expected_first))
+            and int(prefix["draw_no"].iloc[-1]) == history_last
+        )
+        if not prefix_complete or prefix_fingerprint != expected_fingerprint:
+            status_rows.append({**base_status, "状态": "拒绝评分：锁定历史前缀不完整或指纹不匹配"})
+            continue
+        if target_draw not in draw_map:
+            if current_last >= target_draw:
+                status_rows.append({**base_status, "状态": "拒绝评分：当前历史跳过了目标期号"})
+            else:
+                status_rows.append({**base_status, "状态": "等待开奖数据（锁定历史前缀指纹已核验）"})
             continue
 
         actual = draw_map[target_draw]

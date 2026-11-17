@@ -68,7 +68,7 @@ class V52RollingValidationTests(unittest.TestCase):
         )
         detail, summary, status = evaluate_v51_forward_lock_events(history, [event])
         self.assertTrue(summary.empty)
-        self.assertEqual(status.iloc[0]["状态"], "等待开奖数据")
+        self.assertEqual(status.iloc[0]["状态"], "等待开奖数据（锁定历史前缀指纹已核验）")
 
         next_row = synthetic_history(241).tail(1)
         extended = pd.concat([history, next_row], ignore_index=True)

@@ -1,0 +1,38 @@
+{
+  "manifest_schema_version": 1,
+  "commitment_id": "lotto645-v51-forward-lock-draw-1251",
+  "event_id": "b1ba0fb9-4b1d-4dc3-8da2-43c45003e5eb",
+  "event_type": "v51_forward_lock",
+  "target_draw": 1251,
+  "event_created_at_utc": "2026-11-17T09:51:07+00:00",
+  "history": {
+    "first_draw": 1,
+    "last_draw": 1250,
+    "rows": 1250,
+    "fingerprint_sha256": "5529086e3d3401d20b778d94a62e41f3ee2bf0a886018e986ee1ecbe46ef1d11"
+  },
+  "archive_commitment": {
+    "raw_file_sha256": "74994fa6ddb5ab7157d699cd95de6f91e997f77b79072c7083f816620eeee77a",
+    "canonical_archive_sha256": "e993b61df8d52209b90fb2df65cf68c227bb93c561b5c86b0bbaba12c12d28d7",
+    "canonical_event_sha256": "dd55888e646e7eacfea04191330978f394c88275e38437757ba0ba8caa0eee32",
+    "raw_file_name": "lotto645_v55_forward_lock_archive (1).json",
+    "ticket_numbers_embedded": false
+  },
+  "configuration": {
+    "engine_version": "5.0.0-predictive-research",
+    "training_window": 500,
+    "ridge_alpha": 1,
+    "pair_strength": 0.5,
+    "seed": 5050,
+    "random_seed": 18861,
+    "model_ticket_count": 10,
+    "random_ticket_count": 10,
+    "probability_count": 45
+  },
+  "timestamp_provenance": {
+    "event_timestamp_provenance": "self_reported_in_the_uploaded_archive",
+    "github_commitment_provenance": "this_hash_only_manifest_is_committed_to_the_repository_history; use its commit timestamp as an external commitment anchor",
+    "limitation": "A hash commitment proves that matching bytes existed no later than the repository commit, but proving it predates the actual draw still requires comparing the commit timestamp with the target draw date supplied in the manually imported CSV."
+  },
+  "data_policy": "manual_csv_only_no_external_lottery_site_or_api_access"
+}
