@@ -1579,13 +1579,19 @@ if show_legacy_tools:
                 "协议": v77_report["protocol_id"],
                 "状态": v77_report["status"],
                 "已评分且唯一目标期": f'{v77_report["scored_unique_draws"]}/{v77_report["planned_draws"]}',
-                "尚缺期号": v77_report["missing_draws"],
+                "尚缺开奖评分期号": v77_report["missing_draws"],
+                "尚缺锁定记录期号": v77_report["missing_lock_draws"],
                 "重复锁定期号（已排除）": v77_report["duplicate_draws_excluded"],
+                "模型配置不一致期号": v77_report["configuration_mismatch_draws"],
             })
             if v77_report["analysis_ready"]:
                 st.success("1251—1300期固定观察段已完整，已生成一次性主要终点区间。")
             elif v77_report["duplicate_draws_excluded"]:
                 st.error("检测到同一期存在多份锁定记录。相关目标期已全部排除；不得挑选其中表现最好的一份。")
+            elif v77_report["status"] == "protocol_violation_configuration_mismatch":
+                st.error("检测到模型配置偏离1251期冻结配置。该目标期不能并入同一模型的确认性前瞻结果。")
+            elif v77_report["status"] == "protocol_violation_missing_reference_lock":
+                st.error("缺少唯一且有效的1251期配置参考锁定档案；当前不能确认模型参数冻结。")
             else:
                 st.info("仍在收集前瞻结果。完成全部50个目标期后，才会生成主要终点的确认性区间。")
             if not v77_metric_table.empty:
