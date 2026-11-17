@@ -9,10 +9,14 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from pathlib import Path
 from typing import Any
 
 import pandas as pd
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
 
 from forward_lock_commitment import (
     audit_1251_history_prefix,
@@ -22,9 +26,6 @@ from forward_lock_commitment import (
 from lotto_core import validate_frame
 from v40_store import import_event_archive
 from v52_rolling_validation import evaluate_v51_forward_lock_events
-
-ROOT = Path(__file__).resolve().parents[1]
-
 
 def run_audit(
     history: pd.DataFrame,
