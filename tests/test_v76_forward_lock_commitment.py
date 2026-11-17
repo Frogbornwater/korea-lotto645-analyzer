@@ -11,6 +11,7 @@ from forward_lock_commitment import (
     _canonical_json_sha256,
     audit_1251_history_prefix,
     filter_uncommitted_1251_events,
+    merge_events_with_1251_commitment,
     load_1251_commitment,
     verify_1251_archive_bytes,
 )
@@ -118,6 +119,27 @@ class V76ForwardLockTests(unittest.TestCase):
             [event, unrelated], unrelated_archive, manifest
         )
         self.assertEqual(accepted_unrelated, [event, unrelated])
+
+    def test_commitment_aware_merge_replaces_or_removes_stale_session_copy(self):
+        stale = {"event_id": "committed-1251", "payload": {"source": "stale"}}
+        unrelated = {"event_id": "unrelated"}
+        fresh = {"event_id": "committed-1251", "payload": {"source": "fresh"}}
+        manifest = {"event_id": "committed-1251"}
+
+        matched = merge_events_with_1251_commitment(
+            [stale, unrelated], [fresh], {"applicable": True, "matched": True}, manifest
+        )
+        self.assertEqual(matched, [unrelated, fresh])
+
+        mismatched = merge_events_with_1251_commitment(
+            [stale, unrelated], [fresh], {"applicable": True, "matched": False}, manifest
+        )
+        self.assertEqual(mismatched, [unrelated])
+
+        generic = merge_events_with_1251_commitment(
+            [stale], [{"event_id": "other"}], {"applicable": False, "matched": False}, manifest
+        )
+        self.assertEqual(generic, [stale, {"event_id": "other"}])
 
     def test_prefix_integrity_is_checked_while_target_result_is_pending(self):
         history = synthetic_history(5)
