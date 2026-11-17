@@ -115,10 +115,11 @@ def verify_1251_archive_bytes(
         and event.get("data_fingerprint_sha256")
         == commitment["history"]["fingerprint_sha256"]
     )
-    result["configuration_matches"] = all(
-        configuration.get(key) == value
-        for key, value in commitment["configuration"].items()
-        if key not in ("model_ticket_count", "random_ticket_count", "probability_count")
+    expected_config = commitment["configuration"]
+    config_fields = ("engine_version", "training_window", "ridge_alpha", "pair_strength", "seed")
+    result["configuration_matches"] = (
+        all(configuration.get(key) == expected_config[key] for key in config_fields)
+        and metadata.get("random_seed") == expected_config["random_seed"]
     )
     model_count = sum(
         1 for row in tickets if row.get("策略") == "V5.1联合概率选号"
