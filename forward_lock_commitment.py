@@ -154,6 +154,22 @@ def verify_1251_archive_bytes(
     return result
 
 
+def filter_uncommitted_1251_events(
+    events: list[dict[str, Any]],
+    verification: dict[str, Any],
+    manifest: dict[str, Any] | None = None,
+) -> list[dict[str, Any]]:
+    """Exclude only the committed 1251 event when its uploaded archive mismatches."""
+    commitment = manifest or load_1251_commitment()
+    if not verification.get("applicable") or verification.get("matched"):
+        return list(events)
+    committed_event_id = str(commitment["event_id"])
+    return [
+        event for event in events
+        if str(event.get("event_id")) != committed_event_id
+    ]
+
+
 def audit_1251_history_prefix(
     history: pd.DataFrame,
     manifest: dict[str, Any] | None = None,
