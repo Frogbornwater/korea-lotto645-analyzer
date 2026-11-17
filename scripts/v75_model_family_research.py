@@ -182,9 +182,12 @@ def _predict_config(
     family = config["family"]
     pair_scores = None
     training_draws = int(target_idx)
+    effective_sample_draws = float(target_idx)
 
     if family == "uniform":
         probabilities = np.full(45, BASE_RATE, dtype=float)
+        training_draws = 0
+        effective_sample_draws = 0.0
         pair_strength = 0.0
         tickets = generate_tickets(
             probabilities, None, TICKETS_PER_DRAW, target_seed, pair_strength=0.0
@@ -199,6 +202,8 @@ def _predict_config(
         probabilities = frequency_probabilities(
             matrix, target_idx, window=config["window"], prior=config["prior"]
         )
+        training_draws = min(int(config["window"]), int(target_idx))
+        effective_sample_draws = float(training_draws)
         pair_strength = 0.0
         tickets = generate_tickets(
             probabilities, None, TICKETS_PER_DRAW, target_seed, pair_strength=0.0
@@ -207,6 +212,11 @@ def _predict_config(
         probabilities = frequency_probabilities(
             matrix, target_idx, half_life=config["half_life"], prior=config["prior"]
         )
+        weights = np.exp2(
+            -np.arange(int(target_idx) - 1, -1, -1, dtype=float)
+            / float(config["half_life"])
+        )
+        effective_sample_draws = float(weights.sum() ** 2 / np.square(weights).sum())
         pair_strength = 0.0
         tickets = generate_tickets(
             probabilities, None, TICKETS_PER_DRAW, target_seed, pair_strength=0.0
@@ -220,6 +230,7 @@ def _predict_config(
             config["ridge_alpha"],
         )
         training_draws = int(diagnostics["training_draws"])
+        effective_sample_draws = float(training_draws)
         if training_draws < MIN_TRAINING_DRAWS:
             raise RuntimeError(
                 f"V5训练样本不足：{training_draws} < {MIN_TRAINING_DRAWS}。"
@@ -235,6 +246,7 @@ def _predict_config(
     metrics = _metric_row(probabilities, tickets, actual, random_tickets)
     return {
         "training_draws": training_draws,
+        "effective_sample_draws": effective_sample_draws,
         "probability_sum": float(probabilities.sum()),
         "pair_strength": float(pair_strength),
         **metrics,
@@ -387,6 +399,9 @@ def run_research(frame: pd.DataFrame) -> dict:
             "selected_training_draws_min": int(block["training_draws"].min()),
             "selected_training_draws_max": int(block["training_draws"].max()),
             "selected_training_draws_mean": float(block["training_draws"].mean()),
+            "selected_effective_sample_draws_min": float(block["effective_sample_draws"].min()),
+            "selected_effective_sample_draws_max": float(block["effective_sample_draws"].max()),
+            "selected_effective_sample_draws_mean": float(block["effective_sample_draws"].mean()),
             "prior_config_ranking_top10": ranking[:10],
         })
 
@@ -421,6 +436,7 @@ def run_research(frame: pd.DataFrame) -> dict:
         batch_3plus=("batch_3plus", "mean"),
         batch_4plus=("batch_4plus", "mean"),
         mean_training_draws=("training_draws", "mean"),
+        mean_effective_sample_draws=("effective_sample_draws", "mean"),
     )
     family_summary = family_summary.sort_values(
         ["Brier", "LogLoss", "top10_hits"], ascending=[True, True, False]
@@ -455,6 +471,7 @@ def run_research(frame: pd.DataFrame) -> dict:
         "v5_ridge_alpha": 1.0,
         "v5_pair_strengths": [0.0, 0.5, 1.0],
         "minimum_v5_training_draws": MIN_TRAINING_DRAWS,
+        "selected_effective_sample_draws_range": [float(selected["effective_sample_draws"].min()), float(selected["effective_sample_draws"].max())],
         "tickets_per_draw": TICKETS_PER_DRAW,
         "selection": "First block uses preregistered fixed V5; each later 100-draw block selects one of 31 configurations by mean rank over Top10, Brier, LogLoss and mean hits, using only all candidate results from completed earlier blocks.",
         "uncertainty": f"{BOOTSTRAP_REPS} moving-block bootstrap replicates, block length {BLOCK_BOOTSTRAP_LENGTH}; Bonferroni family-wise 95% intervals across 10 metrics per comparison family.",
