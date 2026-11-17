@@ -117,7 +117,7 @@ def run_experiment(frame: pd.DataFrame) -> dict:
         for row in real_detail.to_dict(orient="records"):
             metrics = per_draw_metrics(row)
             improvement = improvement_from_null(metrics, nulls)
-            item = {"fold": fold_index, "target_draw": int(row["目标期号"]), **metrics}
+            item = {"fold": fold_index, "target_draw": int(row["目标期号"]), "V5_45号码概率_JSON": row["V5_45号码概率_JSON"], "实际主号码": row["实际主号码"], **metrics}
             item.update({f"improvement_{k}": v for k, v in improvement.items()})
             for seed, placebo_detail in placebo_details.items():
                 p_row = placebo_detail.loc[placebo_detail["目标期号"] == row["目标期号"]]
