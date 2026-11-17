@@ -1910,3 +1910,144 @@ with page_v55:
         "- 至少积累多个前瞻评估区间，再决定是否调整正式模型。"
     )
 
+    st.divider()
+    st.markdown("#### 真正的开奖前锁定与开奖后评分")
+    st.caption("此流程把本次45维概率、10注V5候选、10注均匀随机对照、参数、随机种子和历史数据指纹封存在同一事件中。开奖后导入更新后的手动历史数据和锁定档案，系统才会评分。")
+
+    if "v55_forward_events" not in st.session_state:
+        st.session_state["v55_forward_events"] = []
+
+    archive_upload = st.file_uploader(
+        "导入以前保存的前瞻锁定档案（JSON）",
+        type=["json"], key="v55_forward_archive_upload",
+        help="用于恢复之前下载的锁定档案；不会联网获取任何开奖数据。"
+    )
+    if archive_upload is not None:
+        try:
+            restored_events = import_event_archive(archive_upload.getvalue())
+            existing_ids = {event["event_id"] for event in st.session_state["v55_forward_events"]}
+            merged_events = list(st.session_state["v55_forward_events"])
+            merged_events.extend(event for event in restored_events if event["event_id"] not in existing_ids)
+            st.session_state["v55_forward_events"] = merged_events
+            st.success(f"已载入 {len(restored_events)} 条档案事件；当前会话共保留 {len(merged_events)} 条。")
+        except Exception as exc:
+            st.error(f"档案导入失败：{type(exc).__name__}: {exc}")
+
+    forward_events = st.session_state.get("v55_forward_events", [])
+    with st.expander("本次前瞻锁定参数", expanded=True):
+        lock_cols = st.columns(4)
+        lock_training_window = lock_cols[0].selectbox(
+            "训练窗口", [300, 400, 500, 700, 900, 1000],
+            index=2, key="v55_lock_training_window"
+        )
+        lock_alpha = lock_cols[1].selectbox(
+            "Ridge alpha", [0.1, 0.3, 1.0, 3.0, 10.0],
+            index=2, key="v55_lock_alpha"
+        )
+        lock_pair_strength = lock_cols[2].selectbox(
+            "共现抽样强度", [0.0, 0.25, 0.5, 0.75, 1.0],
+            index=2, key="v55_lock_pair_strength"
+        )
+        lock_seed = lock_cols[3].number_input(
+            "随机种子", min_value=0, max_value=2147483647,
+            value=5050, step=1, key="v55_lock_seed"
+        )
+
+    if st.button("锁定下一期预测与随机对照", type="primary", use_container_width=True, key="v55_create_forward_lock"):
+        try:
+            if not quality["range_complete"]:
+                raise ValueError("当前手动历史文件覆盖范围内存在缺期，不能建立前瞻锁。")
+            prediction = v50_fit_predict_next(
+                df, training_window=int(lock_training_window),
+                min_history=180, ridge_alpha=float(lock_alpha)
+            )
+            probability_vector = (
+                prediction["number_probabilities"].sort_values("号码")["预测入选概率"].to_numpy(dtype=float)
+            )
+            tickets, effective_overlap, overlap_relaxed = v51_generate_constrained_tickets(
+                probability_vector, prediction["pair_scores"], count=10,
+                seed=int(lock_seed), pair_strength=float(lock_pair_strength),
+                max_overlap=4
+            )
+            pair_matrix = np.asarray(prediction["pair_scores"], dtype=float)
+            candidate_rows = []
+            for index, ticket in enumerate(tickets, 1):
+                pair_adjustment = float(sum(
+                    pair_matrix[a - 1, b - 1]
+                    for pos, a in enumerate(ticket) for b in ticket[pos + 1:]
+                ))
+                marginal_sum = float(sum(probability_vector[number - 1] for number in ticket))
+                logit_score = float(sum(
+                    np.log(probability_vector[number - 1] / (1.0 - probability_vector[number - 1]))
+                    for number in ticket
+                ))
+                candidate_rows.append({
+                    "组合": index,
+                    "号码": " · ".join(f"{number:02d}" for number in ticket),
+                    "六号码边际概率合计": marginal_sum,
+                    "共现调整项": pair_adjustment,
+                    "模型相对得分": logit_score + float(lock_pair_strength) * pair_adjustment,
+                })
+            candidate_frame = pd.DataFrame(candidate_rows)
+            event = build_v51_forward_lock_event(
+                df, prediction, candidate_frame, seed=int(lock_seed),
+                pair_strength=float(lock_pair_strength), requested_overlap=4,
+                effective_overlap=int(effective_overlap)
+            )
+            current_events = list(st.session_state.get("v55_forward_events", []))
+            if not any(item["event_id"] == event["event_id"] for item in current_events):
+                current_events.append(event)
+            st.session_state["v55_forward_events"] = current_events
+            st.session_state["v55_latest_forward_event"] = event
+            st.session_state["v55_latest_forward_prediction"] = prediction
+            st.session_state["v55_latest_forward_overlap_relaxed"] = bool(overlap_relaxed)
+            st.success(f"已锁定第{prediction['target_draw']}期。请在开奖前下载并保存JSON档案。")
+        except Exception as exc:
+            st.error(f"前瞻锁定失败：{type(exc).__name__}: {exc}")
+
+    latest_event = st.session_state.get("v55_latest_forward_event")
+    latest_prediction = st.session_state.get("v55_latest_forward_prediction")
+    if isinstance(latest_event, dict) and isinstance(latest_prediction, dict):
+        latest_meta = latest_event["payload"]["metadata"]
+        st.markdown("##### 最新锁定记录")
+        mcols = st.columns(4)
+        mcols[0].metric("目标期号", f"第{latest_meta['target_draw']}期")
+        mcols[1].metric("锁定历史末期", f"第{latest_meta['history_last_draw']}期")
+        mcols[2].metric("训练窗口", f"{latest_meta['training_window']}期")
+        mcols[3].metric("概率总和", f"{latest_meta['probability_sum']:.6f}")
+        st.caption(f"数据指纹 SHA-256：{latest_meta['history_fingerprint_sha256']}")
+        if st.session_state.get("v55_latest_forward_overlap_relaxed"):
+            st.warning("为生成10组互不重复组合，实际跨组重号限制已自动放宽；请以锁定参数记录为准。")
+        st.dataframe(event_tickets_frame(latest_event), hide_index=True, use_container_width=True)
+        probability_table = pd.DataFrame(latest_event["payload"]["number_probabilities"])
+        st.dataframe(
+            probability_table.sort_values("预测入选概率", ascending=False).head(15).round(7),
+            hide_index=True, use_container_width=True
+        )
+
+    forward_events = st.session_state.get("v55_forward_events", [])
+    if forward_events:
+        try:
+            archive_bytes = export_event_archive(forward_events)
+            st.download_button(
+                "下载完整前瞻锁定档案 JSON",
+                archive_bytes,
+                "lotto645_v55_forward_lock_archive.json",
+                "application/json", key="v55_forward_archive_download"
+            )
+            detail, summary, statuses = evaluate_v51_forward_lock_events(df, forward_events)
+            st.markdown("##### 前瞻锁定状态与评分")
+            st.dataframe(statuses, hide_index=True, use_container_width=True)
+            if not summary.empty:
+                st.dataframe(summary.round(6), hide_index=True, use_container_width=True)
+                st.download_button(
+                    "下载前瞻逐注评分 CSV",
+                    detail.to_csv(index=False).encode("utf-8-sig"),
+                    "lotto645_v55_forward_scoring_detail.csv",
+                    "text/csv", key="v55_forward_detail_download"
+                )
+                st.info("只有目标期已出现在手动导入数据中，且锁定时的历史前缀指纹完全匹配，才会接受评分。")
+        except Exception as exc:
+            st.error(f"前瞻档案处理失败：{type(exc).__name__}: {exc}")
+
+
