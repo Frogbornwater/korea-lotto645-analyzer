@@ -1,0 +1,167 @@
+name: V5–V7 historical research regression
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ["main"]
+    paths:
+      - "v50_predictive_engine.py"
+      - "lotto_core.py"
+      - "scripts/v50_*.py"
+      - "scripts/v55_*.py"
+      - "scripts/v60_*.py"
+      - "scripts/v61_*.py"
+      - "scripts/v62_*.py"
+      - "scripts/v63_*.py"
+      - "scripts/v64_*.py"
+      - "scripts/v70_*.py"
+      - "scripts/v71_*.py"
+      - "tests/test_v50*.py"
+      - "tests/test_v55*.py"
+      - "tests/test_v60*.py"
+      - "tests/test_v61*.py"
+      - "tests/test_v62*.py"
+      - "tests/test_v63*.py"
+      - "tests/test_v64*.py"
+      - "tests/test_v70*.py"
+      - "tests/test_v71*.py"
+      - "data/lotto645.csv"
+      - "requirements.txt"
+  pull_request:
+    branches: ["main"]
+    paths:
+      - "v50_predictive_engine.py"
+      - "lotto_core.py"
+      - "scripts/v50_*.py"
+      - "scripts/v55_*.py"
+      - "scripts/v60_*.py"
+      - "scripts/v61_*.py"
+      - "scripts/v62_*.py"
+      - "scripts/v63_*.py"
+      - "scripts/v64_*.py"
+      - "scripts/v70_*.py"
+      - "scripts/v71_*.py"
+      - "tests/test_v50*.py"
+      - "tests/test_v55*.py"
+      - "tests/test_v60*.py"
+      - "tests/test_v61*.py"
+      - "tests/test_v62*.py"
+      - "tests/test_v63*.py"
+      - "tests/test_v64*.py"
+      - "tests/test_v70*.py"
+      - "tests/test_v71*.py"
+      - "data/lotto645.csv"
+      - "requirements.txt"
+
+permissions:
+  contents: read
+
+jobs:
+  research:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Compile all Python modules
+        run: python -m compileall -q .
+      - name: Run complete unit test suite
+        run: python -m unittest discover -s tests -v
+
+      - name: Run retrospective V5 real-history benchmark
+        run: python scripts/v50_real_data_benchmark.py
+      - name: Run V5 feature ablation screen
+        run: python scripts/v50_feature_ablation.py
+      - name: Run V5 robustness and placebo diagnostics
+        run: python scripts/v50_robustness_placebo.py
+
+      - name: Prepare V5.5 report directory
+        run: mkdir -p artifacts/v55
+      - name: Run V5.5 Ridge and probability reliability diagnostics
+        run: python scripts/v55_ridge_calibration_diagnostics.py > artifacts/v55/ridge_reliability_report.json
+      - name: Run V5.5 strictly prequential temperature calibration
+        run: python scripts/v55_prequential_temperature_calibration.py > artifacts/v55/temperature_retrospective_report.json
+      - name: Build V5.5 audit bundle and frozen forward lock
+        run: python scripts/v55_build_audit_bundle.py
+      - name: Upload V5.5 audit bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: v55-audit-bundle
+          path: artifacts/v55/
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Run V6.0 isolated 200-draw chronological replay
+        run: python scripts/v60_isolated_200_replay.py
+      - name: Upload V6.0 isolated replay report
+        uses: actions/upload-artifact@v4
+        with:
+          name: v60-isolated-200-replay
+          path: artifacts/v60/
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Run V6.1 nested chronological feature ablation
+        run: python scripts/v61_nested_ablation.py
+      - name: Upload V6.1 nested ablation report
+        uses: actions/upload-artifact@v4
+        with:
+          name: v61-nested-ablation
+          path: artifacts/v61/
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Run V6.2 pair-sampling strength sensitivity
+        run: python scripts/v62_pair_sampling_sensitivity.py
+      - name: Upload V6.2 pair-sampling sensitivity report
+        uses: actions/upload-artifact@v4
+        with:
+          name: v62-pair-sampling-sensitivity
+          path: artifacts/v62/
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Run V6.3 chronological probability-ranking audit
+        run: python scripts/v63_probability_ranking_audit.py
+      - name: Upload V6.3 probability-ranking audit report
+        uses: actions/upload-artifact@v4
+        with:
+          name: v63-probability-ranking-audit
+          path: artifacts/v63/
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Run V6.4 exact uniform-null and Holm audit
+        run: python scripts/v64_exact_null_holm_audit.py
+      - name: Upload V6.4 exact-null and Holm report
+        uses: actions/upload-artifact@v4
+        with:
+          name: v64-exact-null-holm-audit
+          path: artifacts/v64/
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Run V7.0 chronological signal-integrity and label-placebo audit
+        run: python scripts/v70_signal_integrity_audit.py
+      - name: Upload V7.0 signal-integrity audit
+        uses: actions/upload-artifact@v4
+        with:
+          name: v70-signal-integrity-audit
+          path: artifacts/v70/
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Run V7.1 expanding prequential probability calibration audit
+        run: python scripts/v71_prequential_probability_calibration.py
+      - name: Upload V7.1 prequential calibration audit
+        uses: actions/upload-artifact@v4
+        with:
+          name: v71-prequential-calibration-audit
+          path: artifacts/v71/
+          if-no-files-found: error
+          retention-days: 90
