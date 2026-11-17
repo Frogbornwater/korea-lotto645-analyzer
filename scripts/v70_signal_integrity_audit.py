@@ -101,7 +101,8 @@ def run_experiment(frame: pd.DataFrame) -> dict:
         raise ValueError("V7.0开发审计要求数据至少连续覆盖第1—1049期。")
     # Hard pin the research screen to the already explored development period.
     history = history.loc[history["draw_no"] <= 1049].copy().reset_index(drop=True)
-    nulls = exact_null_baselines()
+    all_nulls = exact_null_baselines()
+    nulls = {key: all_nulls[key] for key in ("top6_hits", "top10_hits", "top15_hits", "Brier", "LogLoss")}
     records = []
     fold_reports = []
 
@@ -130,7 +131,9 @@ def run_experiment(frame: pd.DataFrame) -> dict:
             records.append(item)
             fold_improvements.append(improvement)
         fold_reports.append({
-            "fold": fold_index, "target_range": [start, end], "target_draws": len(real_detail),
+            "fold": fold_index,
+            "target_range": [start, end],
+            "target_draws": len(real_detail),
             "placebo_seeds": list(PLACEBO_SEEDS),
             "mean_improvement_vs_exact_uniform": {
                 key: float(np.mean([x[key] for x in fold_improvements]))
@@ -139,12 +142,12 @@ def run_experiment(frame: pd.DataFrame) -> dict:
             "placebo_mean_improvement_vs_exact_uniform": {
                 str(seed): {
                     key: float(np.mean([
-                        per_draw_metrics(r)["Brier"] if key == "Brier" else
-                        per_draw_metrics(r)["LogLoss"] if key == "LogLoss" else
-                        per_draw_metrics(r)[key]
-                        for r in placebo_details[seed].to_dict(orient="records")
-                    ])) for key in ()
-                } for seed in ()
+                        improvement_from_null(per_draw_metrics(row), nulls)[key]
+                        for row in placebo_details[seed].to_dict(orient="records")
+                    ]))
+                    for key in nulls
+                }
+                for seed in PLACEBO_SEEDS
             },
         })
 
