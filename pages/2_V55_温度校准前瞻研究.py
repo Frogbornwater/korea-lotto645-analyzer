@@ -20,6 +20,7 @@ from v55_forward_temperature import (
     evaluate_v55_temperature_forward_events,
     load_commitment,
     persist_hash_only_commitment,
+    verify_persisted_hash_only_commitment,
 )
 
 st.set_page_config(page_title="V5.5温度校准前瞻研究", page_icon="🧪", layout="wide")
@@ -120,6 +121,8 @@ if "v77_v55_temperature_events" not in st.session_state:
     st.session_state["v77_v55_temperature_events"] = []
 if "v77_v55_commit_anchors" not in st.session_state:
     st.session_state["v77_v55_commit_anchors"] = {}
+if "v77_v55_anchor_verification" not in st.session_state:
+    st.session_state["v77_v55_anchor_verification"] = {}
 
 events = st.session_state["v77_v55_temperature_events"]
 ready = bool(is_contiguous and prefix_audit.get("ok") and history_last > 1250)
@@ -155,7 +158,14 @@ if st.button(
             if token:
                 try:
                     anchor_result = persist_hash_only_commitment(event, token)
+                    verification_result = verify_persisted_hash_only_commitment(event, token)
                     st.session_state["v77_v55_commit_anchors"][str(target)] = anchor_result
+                    st.session_state["v77_v55_anchor_verification"][event["event_id"]] = verification_result
+                    if not verification_result.get("verified"):
+                        st.warning(
+                            "GitHub返回了写入结果，但重新读取哈希承诺时没有通过核验；"
+                            "该事件不会进入前瞻评分，需先查明原因。"
+                        )
                 except Exception as anchor_exc:
                     st.warning(
                         "研究锁已生成，但GitHub哈希时间锚创建失败；"
@@ -242,7 +252,66 @@ if archive_upload is not None:
 events = st.session_state.get("v77_v55_temperature_events", [])
 if events:
     try:
-        summary, detail, status = evaluate_v55_temperature_forward_events(history, events)
+        try:
+            verifier_token = str(st.secrets.get("GITHUB_RESEARCH_TOKEN", "")).strip()
+        except Exception:
+            verifier_token = ""
+        verification_cache = st.session_state.setdefault("v77_v55_anchor_verification", {})
+        verified_events = []
+        verification_rows = []
+        for event in events:
+            if event.get("event_type") != EVENT_TYPE:
+                continue
+            event_id = str(event.get("event_id", ""))
+            verification = verification_cache.get(event_id)
+            if not isinstance(verification, dict) or "verified" not in verification:
+                verification = verify_persisted_hash_only_commitment(event, verifier_token)
+                verification_cache[event_id] = verification
+            meta = event.get("payload", {}).get("metadata", {})
+            target_draw = int(meta.get("target_draw", -1))
+            temporal_status = "哈希未通过：不纳入评分"
+            if verification.get("verified"):
+                verified_events.append(event)
+                commit_time = verification.get("commit_time_utc")
+                target_rows = history[history["draw_no"] == target_draw]
+                if not commit_time:
+                    temporal_status = "缺少GitHub提交时间，无法证明开奖前锁定"
+                elif target_rows.empty:
+                    temporal_status = "等待目标期开奖日期导入后核验时间先后"
+                else:
+                    draw_date = str(target_rows.iloc[0]["date"]).strip()
+                    if not draw_date or draw_date.lower() in {"nan", "none"}:
+                        temporal_status = "开奖日期缺失，无法确认锁定早于开奖"
+                    else:
+                        commit_timestamp = pd.Timestamp(commit_time)
+                        if commit_timestamp.tzinfo is None:
+                            commit_timestamp = commit_timestamp.tz_localize("UTC")
+                        else:
+                            commit_timestamp = commit_timestamp.tz_convert("UTC")
+                        draw_day_start_utc = (
+                            pd.Timestamp(draw_date)
+                            .tz_localize("Asia/Seoul")
+                            .tz_convert("UTC")
+                        )
+                        temporal_status = (
+                            "确认GitHub提交早于开奖日开始"
+                            if commit_timestamp < draw_day_start_utc
+                            else "未能证明GitHub提交早于开奖日开始"
+                        )
+            verification_rows.append({
+                "目标期": target_draw,
+                "公开哈希承诺": "匹配" if verification.get("verified") else "未匹配",
+                "GitHub提交时间UTC": verification.get("commit_time_utc"),
+                "开奖时间先后": temporal_status,
+                "承诺链接": verification.get("manifest_url"),
+                "核验说明": verification.get("status"),
+            })
+        if verification_rows:
+            st.markdown("#### 外部哈希承诺与时间顺序核验")
+            st.dataframe(pd.DataFrame(verification_rows), hide_index=True, use_container_width=True)
+        if len(verified_events) != len([x for x in events if x.get("event_type") == EVENT_TYPE]):
+            st.warning("未通过公开GitHub哈希承诺的事件不会参与前瞻评分。")
+        summary, detail, status = evaluate_v55_temperature_forward_events(history, verified_events)
         if not status.empty:
             st.markdown("#### 前瞻锁定状态")
             st.dataframe(status, hide_index=True, use_container_width=True)
@@ -264,8 +333,10 @@ if events:
                 mime="text/csv",
                 key="v77_download_temperature_detail",
             )
+        elif status.empty and not verified_events:
+            st.info("没有通过公开哈希承诺核验的锁定事件，因此暂不计算前瞻评分。")
         elif status.empty:
-            st.info("尚未导入V5.5温度前瞻锁定档案。")
+            st.info("尚无已开奖且通过历史指纹核验的V5.5温度锁定记录。")
     except Exception as exc:
         st.error(f"前瞻评分失败：{type(exc).__name__}: {exc}")
 else:
