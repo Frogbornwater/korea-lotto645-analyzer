@@ -216,7 +216,7 @@ class V77ProspectiveEvidenceTests(unittest.TestCase):
         self.assertEqual(report["missing_lock_draws"], [V77_END_DRAW])
 
     def test_random_control_seed_is_target_specific_after_1251(self):
-        history = synthetic_history(240)
+        history = synthetic_history(1251)
         prediction = fit_predict_next(
             history, training_window=180, min_history=180, ridge_alpha=1.0
         )
@@ -233,7 +233,7 @@ class V77ProspectiveEvidenceTests(unittest.TestCase):
             requested_overlap=4, effective_overlap=effective,
         )
         target = event["payload"]["metadata"]["target_draw"]
-        self.assertEqual(target, 241)
+        self.assertEqual(target, 1252)
         self.assertEqual(
             event["payload"]["metadata"]["random_seed"],
             5050 ^ 0x5A17 ^ target,
