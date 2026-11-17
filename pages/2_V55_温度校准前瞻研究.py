@@ -19,6 +19,7 @@ from v55_forward_temperature import (
     check_frozen_base_history,
     evaluate_v55_temperature_forward_events,
     load_commitment,
+    persist_hash_only_commitment,
 )
 
 st.set_page_config(page_title="V5.5温度校准前瞻研究", page_icon="🧪", layout="wide")
@@ -117,6 +118,8 @@ st.caption(
 
 if "v77_v55_temperature_events" not in st.session_state:
     st.session_state["v77_v55_temperature_events"] = []
+if "v77_v55_commit_anchors" not in st.session_state:
+    st.session_state["v77_v55_commit_anchors"] = {}
 
 events = st.session_state["v77_v55_temperature_events"]
 ready = bool(is_contiguous and prefix_audit.get("ok") and history_last > 1250)
@@ -142,11 +145,36 @@ if st.button(
                 ticket_count=10,
                 master_seed=7755026,
             )
+            # Commit only a SHA-256 manifest to GitHub. Ticket numbers and
+            # probability vectors stay in the downloadable private JSON file.
+            anchor_result = None
+            try:
+                token = str(st.secrets.get("GITHUB_RESEARCH_TOKEN", "")).strip()
+            except Exception:
+                token = ""
+            if token:
+                try:
+                    anchor_result = persist_hash_only_commitment(event, token)
+                    st.session_state["v77_v55_commit_anchors"][str(target)] = anchor_result
+                except Exception as anchor_exc:
+                    st.warning(
+                        "研究锁已生成，但GitHub哈希时间锚创建失败；"
+                        "请立即下载保存，当前记录不能独立证明早于开奖。"
+                        f"原因：{type(anchor_exc).__name__}: {anchor_exc}"
+                    )
+            else:
+                st.warning(
+                    "研究锁已生成，但未配置GITHUB_RESEARCH_TOKEN；"
+                    "本次只有本地下载档案，没有外部提交时间锚，不能作为严格的开奖前证据。"
+                )
             st.session_state["v77_v55_temperature_events"] = [*events, event]
-            st.success(
-                f"已建立第{target}期独立研究锁定。"
-                "它不改变正式选号，也不影响第1251期原始档案。"
-            )
+            if anchor_result:
+                st.success(
+                    f"第{target}期研究锁已生成，并已建立GitHub哈希承诺。"
+                    "公开仓库只保存哈希，不包含号码与概率明细。"
+                )
+            else:
+                st.info(f"第{target}期研究锁已生成，待下载保存并核实其前瞻时间。")
             st.rerun()
         except Exception as exc:
             st.error(f"研究锁定失败：{type(exc).__name__}: {exc}")
@@ -167,8 +195,20 @@ if events:
             "事件ID": event["event_id"],
             "每组注数": meta["ticket_count_per_strategy"],
         })
+        anchor = st.session_state.get("v77_v55_commit_anchors", {}).get(str(meta["target_draw"]))
+        if anchor:
+            st.markdown(f"[查看第{meta['target_draw']}期公开哈希承诺]({anchor['url']})")
+            if anchor.get("commit_time_utc"):
+                st.caption(f"GitHub提交时间（UTC）：{anchor['commit_time_utc']}")
         ticket_frame = pd.DataFrame(event["payload"]["tickets"])
         st.dataframe(ticket_frame, hide_index=True, use_container_width=True)
+        st.download_button(
+            f"下载第{meta['target_draw']}期单期锁定JSON",
+            data=export_event_archive([event]),
+            file_name=f"lotto645_v55_temperature_draw_{meta['target_draw']}.json",
+            mime="application/json",
+            key=f"v77_download_temperature_lock_{meta['target_draw']}",
+        )
     st.download_button(
         "下载全部V5.5温度前瞻锁定JSON",
         data=export_event_archive(event_options),
