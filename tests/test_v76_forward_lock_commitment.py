@@ -229,6 +229,38 @@ class V76ForwardLockTests(unittest.TestCase):
         self.assertFalse(envelope_result["canonical_archive_sha256_matches"])
         self.assertFalse(envelope_result["matched"])
 
+        # Re-keying the event_id must not make a modified 1251 lock look unrelated.
+        rekeyed = json.loads(archive.decode("utf-8"))
+        rekeyed["events"][0]["event_id"] = "attacker-rekeyed-event"
+        rekeyed_bytes = json.dumps(rekeyed, ensure_ascii=False).encode("utf-8")
+        rekeyed_result = verify_1251_archive_bytes(rekeyed_bytes, manifest)
+        self.assertTrue(rekeyed_result["applicable"])
+        self.assertTrue(rekeyed_result["target_event_count_matches"])
+        self.assertFalse(rekeyed_result["event_id_matches"])
+        self.assertFalse(rekeyed_result["matched"])
+        self.assertEqual(
+            filter_uncommitted_1251_events(
+                rekeyed["events"], rekeyed_result, manifest
+            ),
+            [],
+        )
+
+        # A second V5.1 lock for the same target draw is rejected even when
+        # it uses a distinct event_id.
+        duplicate_target = json.loads(json.dumps(parsed["events"][0]))
+        duplicate_target["event_id"] = "second-1251-candidate"
+        duplicate_archive = export_event_archive([event, duplicate_target])
+        duplicate_result = verify_1251_archive_bytes(duplicate_archive, manifest)
+        self.assertTrue(duplicate_result["applicable"])
+        self.assertFalse(duplicate_result["matched"])
+        self.assertEqual(duplicate_result["error"], "multiple_1251_lock_candidates")
+        self.assertEqual(
+            filter_uncommitted_1251_events(
+                [event, duplicate_target], duplicate_result, manifest
+            ),
+            [],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
