@@ -10,6 +10,7 @@ import pandas as pd
 from forward_lock_commitment import (
     _canonical_json_sha256,
     audit_1251_history_prefix,
+    filter_uncommitted_1251_events,
     load_1251_commitment,
     verify_1251_archive_bytes,
 )
@@ -95,6 +96,28 @@ class V76ForwardLockTests(unittest.TestCase):
         self.assertEqual(audit["current_history_last_draw"], 1250)
         self.assertFalse(audit["target_result_present"])
         self.assertEqual(audit["status"], "awaiting_target_result_prefix_verified")
+
+    def test_mismatched_committed_1251_event_is_excluded_from_scoring(self):
+        event = {"event_id": "committed-1251", "event_type": "v51_forward_lock"}
+        unrelated = {"event_id": "other-event", "event_type": "model_snapshot"}
+        manifest = {"event_id": "committed-1251"}
+        mismatched = {"applicable": True, "matched": False}
+        accepted = filter_uncommitted_1251_events(
+            [event, unrelated], mismatched, manifest
+        )
+        self.assertEqual(accepted, [unrelated])
+
+        verified = {"applicable": True, "matched": True}
+        accepted_verified = filter_uncommitted_1251_events(
+            [event, unrelated], verified, manifest
+        )
+        self.assertEqual(accepted_verified, [event, unrelated])
+
+        unrelated_archive = {"applicable": False, "matched": False}
+        accepted_unrelated = filter_uncommitted_1251_events(
+            [event, unrelated], unrelated_archive, manifest
+        )
+        self.assertEqual(accepted_unrelated, [event, unrelated])
 
     def test_prefix_integrity_is_checked_while_target_result_is_pending(self):
         history = synthetic_history(5)
