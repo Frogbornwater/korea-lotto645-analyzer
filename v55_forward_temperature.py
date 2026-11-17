@@ -434,3 +434,182 @@ def evaluate_v55_temperature_forward_events(
         status_rows.append({**base, "状态": "已评分"})
 
     return pd.DataFrame(summary_rows), pd.DataFrame(detail_rows), pd.DataFrame(status_rows)
+
+
+def build_hash_only_commitment(event: dict[str, Any]) -> tuple[dict[str, Any], str]:
+    """Build a public manifest that anchors an archive hash without exposing tickets."""
+    from v40_store import export_event_archive
+
+    validated = validate_event(event)
+    if validated.get("event_type") != EVENT_TYPE:
+        raise ValueError("只允许为V5.5温度前瞻事件建立哈希承诺。")
+    payload = validated["payload"]
+    metadata = payload["metadata"]
+    archive_bytes = export_event_archive([validated])
+    archive_sha = hashlib.sha256(archive_bytes).hexdigest()
+    manifest = {
+        "commitment_schema_version": 1,
+        "commitment_id": f"lotto645-v55-temperature-draw-{int(metadata['target_draw'])}",
+        "event_id": validated["event_id"],
+        "event_type": EVENT_TYPE,
+        "event_created_at_utc": validated["created_at_utc"],
+        "target_draw": int(metadata["target_draw"]),
+        "history": {
+            "first_draw": int(metadata["history_first_draw"]),
+            "last_draw": int(metadata["history_last_draw"]),
+            "rows": int(metadata["history_rows"]),
+            "numeric_fingerprint_sha256": str(metadata["history_numeric_fingerprint_sha256"]),
+        },
+        "temperature_lock": {
+            "lock_id": str(metadata["temperature_lock_id"]),
+            "temperature": float(metadata["temperature"]),
+            "base_last_draw": EXPECTED_BASE_DRAW,
+            "base_history_sha256": EXPECTED_BASE_FINGERPRINT,
+            "source_lock_file_sha256": str(metadata["temperature_lock_file_sha256"]),
+            "source_artifact_zip_sha256": str(metadata["source_artifact_zip_sha256"]),
+        },
+        "archive_commitment": {
+            "file_name": f"lotto645_v55_temperature_draw_{int(metadata['target_draw'])}.json",
+            "sha256": archive_sha,
+            "ticket_numbers_embedded": False,
+            "probability_vectors_embedded": False,
+        },
+        "provenance_limit": (
+            "This GitHub commit anchors the exact lock archive bytes no later than the commit time. "
+            "To establish that the lock predates the actual draw, compare the GitHub commit time "
+            "with the target draw date in the manually imported history."
+        ),
+    }
+    return manifest, archive_sha
+
+
+def _github_json_request(
+    method: str,
+    url: str,
+    token: str,
+    payload: dict[str, Any] | None = None,
+) -> tuple[int, dict[str, Any]]:
+    import urllib.error
+    import urllib.request
+
+    headers = {
+        "Accept": "application/vnd.github+json",
+        "Authorization": f"Bearer {token}",
+        "X-GitHub-Api-Version": "2022-11-28",
+        "User-Agent": "lotto645-v55-hash-only-lock",
+    }
+    data = None if payload is None else json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    request = urllib.request.Request(url, data=data, headers=headers, method=method)
+    try:
+        with urllib.request.urlopen(request, timeout=20) as response:
+            raw = response.read()
+            return int(response.status), json.loads(raw.decode("utf-8")) if raw else {}
+    except urllib.error.HTTPError as exc:
+        try:
+            body = json.loads(exc.read().decode("utf-8"))
+        except Exception:
+            body = {}
+        return int(exc.code), body
+    except (urllib.error.URLError, TimeoutError) as exc:
+        raise RuntimeError(f"GitHub哈希承诺连接失败：{exc}") from exc
+
+
+def persist_hash_only_commitment(
+    event: dict[str, Any],
+    token: str,
+    *,
+    repository: str = "Frogbornwater/korea-lotto645-analyzer",
+    branch: str = "forward-lock-commitments",
+) -> dict[str, Any]:
+    """Commit only the hash manifest to a separate public branch; never upload tickets."""
+    import base64
+    import urllib.parse
+
+    if not token:
+        raise ValueError("缺少GITHUB_RESEARCH_TOKEN，无法创建外部时间锚。")
+    manifest, archive_sha = build_hash_only_commitment(event)
+    owner, name = repository.split("/", 1)
+    api_root = f"https://api.github.com/repos/{owner}/{name}"
+    branch_encoded = urllib.parse.quote(branch, safe="")
+    branch_status, branch_data = _github_json_request(
+        "GET", f"{api_root}/git/ref/heads/{branch_encoded}", token
+    )
+    if branch_status == 404:
+        main_status, main_data = _github_json_request(
+            "GET", f"{api_root}/git/ref/heads/main", token
+        )
+        if main_status != 200:
+            raise RuntimeError("无法读取main分支，不能创建哈希承诺分支。")
+        create_status, create_data = _github_json_request(
+            "POST",
+            f"{api_root}/git/refs",
+            token,
+            {"ref": f"refs/heads/{branch}", "sha": main_data["object"]["sha"]},
+        )
+        if create_status not in (201, 422):
+            raise RuntimeError(f"创建哈希承诺分支失败：HTTP {create_status}")
+        branch_status, branch_data = _github_json_request(
+            "GET", f"{api_root}/git/ref/heads/{branch_encoded}", token
+        )
+    if branch_status != 200:
+        raise RuntimeError(f"读取哈希承诺分支失败：HTTP {branch_status}")
+
+    target_draw = int(event["payload"]["metadata"]["target_draw"])
+    path = f"forward-lock-commitments/draw_{target_draw}.json"
+    path_encoded = urllib.parse.quote(path, safe="/")
+    existing_status, existing_data = _github_json_request(
+        "GET", f"{api_root}/contents/{path_encoded}?ref={branch_encoded}", token
+    )
+    if existing_status == 200:
+        try:
+            existing_bytes = base64.b64decode(existing_data.get("content", ""))
+            existing_manifest = json.loads(existing_bytes.decode("utf-8"))
+        except Exception as exc:
+            raise RuntimeError("目标期哈希承诺文件已存在且无法验证，拒绝覆盖。") from exc
+        if existing_manifest.get("archive_commitment", {}).get("sha256") == archive_sha:
+            commit_sha = existing_data.get("sha", "")
+            return {
+                "status": "already_committed",
+                "branch": branch,
+                "path": path,
+                "commit_sha": commit_sha,
+                "archive_sha256": archive_sha,
+                "url": f"https://github.com/{repository}/blob/{branch}/{path}",
+            }
+        raise RuntimeError(f"第{target_draw}期已有不同哈希承诺，拒绝覆盖。")
+    if existing_status != 404:
+        raise RuntimeError(f"检查目标期承诺文件失败：HTTP {existing_status}")
+
+    content = (json.dumps(manifest, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
+    put_status, put_data = _github_json_request(
+        "PUT",
+        f"{api_root}/contents/{path_encoded}",
+        token,
+        {
+            "message": f"Commit hash-only V5.5 temperature lock for draw {target_draw}",
+            "content": base64.b64encode(content).decode("ascii"),
+            "branch": branch,
+        },
+    )
+    if put_status not in (200, 201):
+        raise RuntimeError(f"写入哈希承诺失败：HTTP {put_status} {put_data.get('message', '')}")
+    commit_sha = str(put_data.get("commit", {}).get("sha", ""))
+    commit_date = None
+    if commit_sha:
+        commit_status, commit_data = _github_json_request(
+            "GET", f"{api_root}/commits/{commit_sha}", token
+        )
+        if commit_status == 200:
+            commit_date = (
+                commit_data.get("commit", {}).get("committer", {}).get("date")
+                or commit_data.get("commit", {}).get("author", {}).get("date")
+            )
+    return {
+        "status": "committed",
+        "branch": branch,
+        "path": path,
+        "commit_sha": commit_sha,
+        "commit_time_utc": commit_date,
+        "archive_sha256": archive_sha,
+        "url": f"https://github.com/{repository}/blob/{branch}/{path}",
+    }
