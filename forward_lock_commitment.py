@@ -54,10 +54,10 @@ def _is_1251_lock_candidate(
     metadata = payload.get("metadata", {}) if isinstance(payload, dict) else {}
     configuration = payload.get("configuration", {}) if isinstance(payload, dict) else {}
     try:
-        targets_1251 = int(metadata.get("target_draw", -1)) == int(commitment["target_draw"])
+        targets_1251 = int(metadata.get("target_draw", -1)) == int(commitment.get("target_draw", -1))
     except (TypeError, ValueError):
         targets_1251 = False
-    expected_engine = commitment["configuration"]["engine_version"]
+    expected_engine = commitment.get("configuration", {}).get("engine_version")
     engine_matches = (
         metadata.get("engine_version") == expected_engine
         or configuration.get("engine_version") == expected_engine
