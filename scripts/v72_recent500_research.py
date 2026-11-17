@@ -23,7 +23,8 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from lotto_core import validate_frame
-from v50_backtest import run_v50_walk_forward
+from lotto_core import NUMBER_COLS
+from v50_predictive_engine import build_number_features, _fit_from_feature_cache, generate_tickets
 
 TARGET_DRAWS = 500
 BLOCK_SIZE = 100
@@ -138,31 +139,50 @@ def run_research(frame: pd.DataFrame) -> dict:
     if np.any(np.diff(draws) != 1):
         raise ValueError("研究要求手动导入数据在所用范围内期号连续。")
 
+    # Build causal feature rows once and reuse them across all 24 configurations.
+    # This is equivalent to the V5 walk-forward engine's feature construction,
+    # while avoiding 24 redundant O(n^2) feature-cache builds.
+    matrix = history[NUMBER_COLS].to_numpy(dtype=np.int16, copy=True)
+    first_target_idx = len(history) - TARGET_DRAWS
+    feature_cache = {
+        idx: build_number_features(matrix[:idx])
+        for idx in range(MIN_HISTORY, len(history))
+    }
     candidate_results = []
-    for i, config in enumerate(CONFIGS):
-        result = run_v50_walk_forward(
-            history,
-            test_draws=TARGET_DRAWS,
-            training_window=config["training_window"],
-            min_history=MIN_HISTORY,
-            ridge_alpha=config["ridge_alpha"],
-            tickets_per_draw=TICKETS_PER_DRAW,
-            seed=MASTER_SEED,
-            bootstrap_reps=100,
-            pair_sampling_strength=config["pair_strength"],
-        )
-        detail = result["detail"].copy()
-        if len(detail) != TARGET_DRAWS or not (detail["训练结束期"] < detail["目标期号"]).all():
-            raise RuntimeError("候选配置未生成完整的严格前瞻式滚动预测。")
+    for config in CONFIGS:
         key = config_key(config)
-        rows = []
-        for row in detail.to_dict(orient="records"):
-            rows.append({
-                "target_draw": int(row["目标期号"]),
+        for target_idx in range(first_target_idx, len(history)):
+            probabilities, pair_scores, diagnostics = _fit_from_feature_cache(
+                matrix, feature_cache, target_idx,
+                config["training_window"], config["ridge_alpha"]
+            )
+            if int(diagnostics["training_draws"]) < 30:
+                raise RuntimeError("候选配置训练样本不足。")
+            target_draw = int(draws[target_idx])
+            actual = set(int(x) for x in matrix[target_idx])
+            target_seed = int(np.random.SeedSequence([MASTER_SEED, target_draw]).generate_state(1)[0])
+            tickets = generate_tickets(
+                probabilities, pair_scores, TICKETS_PER_DRAW, target_seed,
+                pair_strength=config["pair_strength"]
+            )
+            random_tickets = generate_tickets(
+                np.full(45, 6.0 / 45.0), None, TICKETS_PER_DRAW,
+                target_seed ^ 0x5A17, pair_strength=0.0
+            )
+            row = {
+                "目标期号": target_draw,
+                "训练结束期": int(draws[target_idx - 1]),
+                "训练期数": int(diagnostics["training_draws"]),
+                "V5_45号码概率_JSON": json.dumps([float(x) for x in probabilities], separators=(",", ":")),
+                "实际主号码": json.dumps(sorted(actual)),
+                "V5_号码列表": "|".join(str(x) for x in tickets),
+                "随机_号码列表": "|".join(str(x) for x in random_tickets),
+            }
+            candidate_results.append({
+                "target_draw": target_draw,
                 "config_key": key,
                 **_draw_metrics(row),
             })
-        candidate_results.extend(rows)
 
     candidates = pd.DataFrame(candidate_results)
     expected_targets = list(range(int(draws[-TARGET_DRAWS]), int(draws[-1]) + 1))
