@@ -54,5 +54,11 @@
     "Show only descriptive summaries before all 50 draws are complete; do not issue interim significance claims."
   ],
   "data_policy": "Only user-manually-imported historical CSV/Excel data. No official lottery website, API, scraping, third-party results feed, or automatic draw synchronization.",
-  "interpretation_boundary": "This protocol evaluates a pre-specified model against a same-draw random control. It does not imply improved future winning probability unless the locked prospective results support that conclusion."
+  "interpretation_boundary": "This protocol evaluates a pre-specified model against a same-draw random control. It does not imply improved future winning probability unless the locked prospective results support that conclusion.",
+  "timestamp_anchor_policy": {
+    "requirement": "Each target lock needs an independently verifiable hash-only repository commitment created before that target draw.",
+    "draw_1251": "V7.6 contains a hash-only repository commitment; its chronology must still be checked against the actual draw date in the manually imported history.",
+    "draws_1252_to_1300": "The event created_at_utc value is self-reported unless and until a separate pre-draw hash-only repository commitment is recorded.",
+    "interpretation": "A completed statistical window or Bootstrap interval is not, by itself, proof that every prediction was locked before its outcome. Do not claim proven prospective advantage until all included target locks have pre-draw timestamp anchors."
+  }
 }
