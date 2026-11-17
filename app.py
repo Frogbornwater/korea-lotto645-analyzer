@@ -64,6 +64,7 @@ from v40_governance import (
 from v50_predictive_engine import fit_predict_next as v50_fit_predict_next, generate_tickets as v50_generate_tickets, build_v50_forward_lock
 from v51_smart_picker import generate_constrained_tickets as v51_generate_constrained_tickets
 from v52_rolling_validation import build_v51_forward_lock_event, event_tickets_frame, evaluate_v51_forward_lock_events
+from forward_lock_commitment import verify_1251_archive_bytes
 from v53_randomized_audit import run_multi_seed_random_audit
 from v50_backtest import run_v50_walk_forward
 from scripts.v55_prequential_temperature_calibration import run_experiment as run_v55_temperature_experiment
@@ -1531,7 +1532,20 @@ if show_legacy_tools:
         archive_upload = st.file_uploader("导入此前下载的V5.1锁定档案JSON", type=["json"], key="v52_archive_upload")
         if archive_upload is not None:
             try:
-                imported = import_event_archive(archive_upload.getvalue())
+                archive_bytes = archive_upload.getvalue()
+                imported = import_event_archive(archive_bytes)
+                _1251_commitment = verify_1251_archive_bytes(archive_bytes)
+                if _1251_commitment.get("applicable"):
+                    if _1251_commitment.get("matched"):
+                        st.success(
+                            "第1251期锁定档案内容与仓库中的哈希承诺完全匹配。"
+                            "该承诺锚定了档案内容；是否确实早于开奖，仍需对照仓库提交时间与手动导入的开奖日期。"
+                        )
+                    else:
+                        st.warning(
+                            "检测到第1251期锁定事件，但它与仓库哈希承诺不匹配。"
+                            "系统仍会执行历史前缀指纹校验，不会把该档案当作已锚定的原始锁定内容。"
+                        )
                 existing_ids = {event.get("event_id") for event in st.session_state.get("v40_events", [])}
                 merged = list(st.session_state.get("v40_events", []))
                 merged.extend(event for event in imported if event.get("event_id") not in existing_ids)
