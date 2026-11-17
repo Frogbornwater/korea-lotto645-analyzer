@@ -31,7 +31,7 @@ class V70SignalIntegrityTests(unittest.TestCase):
         import json
         row = {
             "V5_45号码概率_JSON": json.dumps([6.0 / 45.0] * 45),
-            "实际主号码": json.dumps([1, 2, 3, 4, 5, 6]),
+            "实际主号码": json.dumps([7, 8, 9, 10, 11, 12]),
             "V5_Brier": 0.1,
             "V5_LogLoss": 0.3,
         }
