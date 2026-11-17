@@ -88,6 +88,7 @@ def _bootstrap_mean_interval(
 def build_v77_evidence_report(
     forward_summary: pd.DataFrame | None,
     *,
+    lock_events: list[dict[str, Any]] | None = None,
     start_draw: int = V77_START_DRAW,
     planned_draws: int = V77_PLANNED_DRAWS,
     bootstrap_repetitions: int = V77_BOOTSTRAP_REPLICATES,
@@ -192,6 +193,33 @@ def build_v77_evidence_report(
                 "LogLoss差值": model_log_loss - UNIFORM_LOG_LOSS if np.isfinite(model_log_loss) else np.nan,
             })
         rows = pd.DataFrame(normalized_rows, columns=_OUTPUT_COLUMNS)
+
+    # Count every imported/active lock, not only events that happened to score.
+    # This prevents a failed or pending duplicate lock from disappearing from
+    # the protocol audit and then allowing the best-scoring sibling to survive.
+    lock_target_counts: dict[int, int] = {}
+    lock_outside_window: set[int] = set()
+    for event in lock_events or []:
+        if not isinstance(event, dict) or event.get("event_type") != "v51_forward_lock":
+            continue
+        metadata = event.get("payload", {}).get("metadata", {})
+        try:
+            lock_target = int(metadata.get("target_draw", -1))
+        except (TypeError, ValueError):
+            continue
+        if start_draw <= lock_target <= end_draw:
+            lock_target_counts[lock_target] = lock_target_counts.get(lock_target, 0) + 1
+        else:
+            lock_outside_window.add(lock_target)
+
+    duplicate_lock_draws = {
+        draw_no for draw_no, count in lock_target_counts.items() if count > 1
+    }
+    duplicate_draws = sorted(set(duplicate_draws) | duplicate_lock_draws)
+    out_of_window_draws = sorted(set(out_of_window_draws) | lock_outside_window)
+
+    if duplicate_draws:
+        rows = rows.loc[~rows["目标期号"].isin(duplicate_draws)].reset_index(drop=True)
 
     valid_draws = sorted(int(value) for value in rows["目标期号"].tolist())
     missing_draws = sorted(set(expected_draws) - set(valid_draws))
