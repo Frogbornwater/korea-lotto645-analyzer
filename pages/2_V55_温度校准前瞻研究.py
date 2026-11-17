@@ -159,6 +159,10 @@ if st.button(
                 try:
                     anchor_result = persist_hash_only_commitment(event, token)
                     verification_result = verify_persisted_hash_only_commitment(event, token)
+                    if verification_result.get("verified") and not verification_result.get("commit_time_utc"):
+                        verification_result["commit_time_utc"] = anchor_result.get("commit_time_utc")
+                        verification_result["commit_sha"] = anchor_result.get("commit_sha")
+                        verification_result["manifest_url"] = anchor_result.get("url")
                     st.session_state["v77_v55_commit_anchors"][str(target)] = anchor_result
                     st.session_state["v77_v55_anchor_verification"][event["event_id"]] = verification_result
                     if not verification_result.get("verified"):
