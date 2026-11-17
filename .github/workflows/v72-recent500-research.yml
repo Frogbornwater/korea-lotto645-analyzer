@@ -21,7 +21,7 @@ jobs:
       - name: Compile V7.2 research and tests
         run: python -m py_compile scripts/v72_recent500_research.py tests/test_v72_recent500_research.py
       - name: Run V7.2 unit tests
-        run: python -m unittest tests.test_v72_recent500_research -v
+        run: python -m unittest discover -s tests -p 'test_v72_recent500_research.py' -v
       - name: Run recent-500 expanding prequential research
         run: python scripts/v72_recent500_research.py
       - name: Upload V7.2 research artifacts
