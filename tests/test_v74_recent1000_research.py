@@ -51,6 +51,13 @@ class V74Recent1000ResearchTests(unittest.TestCase):
         values = pd.Series([0.0, 1.0, -1.0, 0.5] * 20).to_numpy()
         self.assertEqual(moving_block_ci(values, 77), moving_block_ci(values, 77))
 
+    def test_bonferroni_interval_is_wider_than_nominal_interval(self):
+        values = pd.Series([0.0, 1.0, -1.0, 0.5] * 30).to_numpy()
+        nominal = moving_block_ci(values, 91, alpha=0.05)
+        adjusted = moving_block_ci(values, 91, alpha=0.005)
+        self.assertLessEqual(adjusted[0], nominal[0])
+        self.assertGreaterEqual(adjusted[1], nominal[1])
+
 
 if __name__ == "__main__":
     unittest.main()
