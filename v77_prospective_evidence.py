@@ -30,6 +30,8 @@ UNIFORM_LOG_LOSS = -(
 
 _REQUIRED_COLUMNS = (
     "目标期号",
+    "V5.1注数",
+    "随机注数",
     "V5.1平均命中数",
     "随机平均命中数",
     "V5.1单注3+率",
@@ -42,6 +44,8 @@ _REQUIRED_COLUMNS = (
 
 _OUTPUT_COLUMNS = (
     "目标期号",
+    "V5.1注数",
+    "随机注数",
     "V5.1平均命中数",
     "随机平均命中数",
     "平均命中差值",
@@ -143,6 +147,10 @@ def build_v77_evidence_report(
         normalized_rows: list[dict[str, Any]] = []
         for _, raw in accepted.sort_values("目标期号").iterrows():
             draw_no = int(raw["目标期号"])
+            model_ticket_count = int(_finite_number(raw["V5.1注数"], "V5.1注数", draw_no))
+            random_ticket_count = int(_finite_number(raw["随机注数"], "随机注数", draw_no))
+            if model_ticket_count < 1 or model_ticket_count != random_ticket_count:
+                raise ValueError(f"第{draw_no}期V5.1与随机对照的注数不一致或为零。")
             model_hits = _finite_number(raw["V5.1平均命中数"], "V5.1平均命中数", draw_no)
             random_hits = _finite_number(raw["随机平均命中数"], "随机平均命中数", draw_no)
             model_ticket3 = _finite_number(raw["V5.1单注3+率"], "V5.1单注3+率", draw_no)
@@ -176,6 +184,8 @@ def build_v77_evidence_report(
 
             normalized_rows.append({
                 "目标期号": draw_no,
+                "V5.1注数": model_ticket_count,
+                "随机注数": random_ticket_count,
                 "V5.1平均命中数": model_hits,
                 "随机平均命中数": random_hits,
                 "平均命中差值": model_hits - random_hits,
