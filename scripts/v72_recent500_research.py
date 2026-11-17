@@ -175,14 +175,17 @@ def run_research(frame: pd.DataFrame) -> dict:
     block_reports = []
     for block_no, start in enumerate(range(expected_targets[0], expected_targets[-1] + 1, BLOCK_SIZE), 1):
         end = min(start + BLOCK_SIZE - 1, expected_targets[-1])
-        prior = pd.DataFrame(selected_rows)
+        # Rank all 24 candidates only on draws strictly earlier than this
+        # block. Do not rank the previously selected strategy alone: doing so
+        # would make the adaptive procedure unable to switch configurations.
+        prior = candidates.loc[candidates["target_draw"] < start].copy()
         chosen, ranking = _rank_configurations(prior)
         if block_no == 1:
             chosen = dict(BASELINE)
             ranking = []
             selection_method = "predeclared_baseline_no_prior_block"
         else:
-            selection_method = "best_mean_rank_on_completed_prior_blocks_only"
+            selection_method = "best_mean_rank_across_all_configs_on_completed_prior_draws_only"
         key = config_key(chosen)
         block = candidates.loc[
             (candidates["config_key"] == key) &
@@ -196,7 +199,7 @@ def run_research(frame: pd.DataFrame) -> dict:
             "target_range": [start, end],
             "selected_config": chosen,
             "selection_method": selection_method,
-            "selection_training_draws": int(len(prior)),
+            "selection_training_draws": int(prior["target_draw"].nunique()),
             "prior_config_ranking": ranking[:10],
         })
 
