@@ -5,6 +5,10 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from lotto_core import COLUMNS
+from v50_predictive_engine import fit_predict_next
+from v51_smart_picker import generate_constrained_tickets
+from v52_rolling_validation import build_v51_forward_lock_event
 from v77_prospective_evidence import (
     UNIFORM_BRIER,
     UNIFORM_LOG_LOSS,
@@ -14,6 +18,20 @@ from v77_prospective_evidence import (
     V77_BOOTSTRAP_SEED,
     build_v77_evidence_report,
 )
+
+def synthetic_history(n=240, seed=77):
+    rng = np.random.default_rng(seed)
+    rows = []
+    for draw_no in range(1, n + 1):
+        numbers = sorted(rng.choice(np.arange(1, 46), size=6, replace=False).tolist())
+        bonus = int(next(value for value in range(1, 46) if value not in numbers))
+        rows.append({
+            "draw_no": draw_no, "date": "",
+            "n1": numbers[0], "n2": numbers[1], "n3": numbers[2],
+            "n4": numbers[3], "n5": numbers[4], "n6": numbers[5],
+            "bonus": bonus,
+        })
+    return pd.DataFrame(rows, columns=COLUMNS)
 
 
 def make_summary(start=V77_START_DRAW, count=50, hit_delta=0.05):
@@ -99,6 +117,10 @@ class V77ProspectiveEvidenceTests(unittest.TestCase):
             V77_BOOTSTRAP_SEED,
         )
         self.assertIn("Do not stop early", " ".join(protocol["protocol_guards"]))
+        self.assertIn(
+            "seed XOR 0x5A17 XOR target_draw",
+            protocol["random_control"]["seed_rule"]["subsequent_draws"],
+        )
         self.assertIn("independently verifiable hash-only", protocol["timestamp_anchor_policy"]["requirement"])
 
     def test_empty_and_partial_windows_are_descriptive_only(self):
@@ -194,11 +216,6 @@ class V77ProspectiveEvidenceTests(unittest.TestCase):
         self.assertEqual(report["missing_lock_draws"], [V77_END_DRAW])
 
     def test_random_control_seed_is_target_specific_after_1251(self):
-        from v52_rolling_validation import build_v51_forward_lock_event
-        from v50_predictive_engine import fit_predict_next
-        from v51_smart_picker import generate_constrained_tickets
-        from tests.test_v52_rolling_validation import synthetic_history
-
         history = synthetic_history(240)
         prediction = fit_predict_next(
             history, training_window=180, min_history=180, ridge_alpha=1.0
