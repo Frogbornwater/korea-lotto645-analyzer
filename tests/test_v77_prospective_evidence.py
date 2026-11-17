@@ -1,4 +1,6 @@
+import json
 import unittest
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -8,6 +10,8 @@ from v77_prospective_evidence import (
     UNIFORM_LOG_LOSS,
     V77_END_DRAW,
     V77_START_DRAW,
+    V77_BOOTSTRAP_REPLICATES,
+    V77_BOOTSTRAP_SEED,
     build_v77_evidence_report,
 )
 
@@ -70,6 +74,28 @@ def make_lock_events(start=V77_START_DRAW, count=50):
 
 
 class V77ProspectiveEvidenceTests(unittest.TestCase):
+    def test_committed_protocol_file_matches_code_constants(self):
+        protocol_path = (
+            Path(__file__).resolve().parents[1]
+            / "data"
+            / "forward_lock_protocols"
+            / "v77_v51_forward_1251_1300.json"
+        )
+        protocol = json.loads(protocol_path.read_text(encoding="utf-8"))
+        self.assertEqual(protocol["protocol_id"], "v77-v51-forward-50-draws")
+        self.assertEqual(protocol["target_draw_window"]["start"], V77_START_DRAW)
+        self.assertEqual(protocol["target_draw_window"]["end"], V77_END_DRAW)
+        self.assertEqual(protocol["target_draw_window"]["count"], 50)
+        self.assertEqual(
+            protocol["primary_endpoint"]["inference"]["repetitions"],
+            V77_BOOTSTRAP_REPLICATES,
+        )
+        self.assertEqual(
+            protocol["primary_endpoint"]["inference"]["seed"],
+            V77_BOOTSTRAP_SEED,
+        )
+        self.assertIn("Do not stop early", " ".join(protocol["protocol_guards"]))
+
     def test_empty_and_partial_windows_are_descriptive_only(self):
         for source in (pd.DataFrame(), make_summary(count=1), make_summary(count=49)):
             report, per_draw, metrics = build_v77_evidence_report(source)
