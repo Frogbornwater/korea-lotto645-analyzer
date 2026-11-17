@@ -17,7 +17,7 @@ import numpy as np
 import pandas as pd
 
 from lotto_core import COLUMNS, NUMBER_COLS, validate_frame
-from v40_governance import data_fingerprint, make_event
+from v40_governance import _holm_adjust, data_fingerprint, make_event, paired_draw_bootstrap
 from v40_store import validate_event
 from v50_predictive_engine import fit_predict_next, generate_tickets
 from scripts.v55_prequential_temperature_calibration import transform
@@ -755,3 +755,145 @@ def verify_persisted_hash_only_commitment(
         "commit_time_utc": commit_time,
         "manifest_url": f"https://github.com/{repository}/blob/{branch}/{path}",
     }
+
+
+
+def aggregate_v55_temperature_forward_evidence(
+    scored_summary: pd.DataFrame,
+    *,
+    minimum_draws: int = 100,
+    repetitions: int = 10000,
+    block_length: int = 3,
+    seed: int = 7755026,
+) -> tuple[pd.DataFrame, dict[str, Any]]:
+    """Aggregate per-draw scores using paired moving-block bootstrap and Holm correction.
+
+    Positive improvement is always favorable: higher is better for hit-rate
+    metrics, while lower is better for Brier and LogLoss. This gate can only
+    recommend a second independent research replication; it never authorizes
+    changes to the production predictor or claims a lottery winning advantage.
+    """
+    required_columns = {
+        "目标期号",
+        "V5原始概率平均命中", "V5.5校准平均命中", "随机平均命中",
+        "V5原始概率单注3+率", "V5.5校准单注3+率", "随机单注3+率",
+        "V5原始概率整批3+", "V5.5校准整批3+", "随机整批3+",
+        "V5原始Brier", "V5.5校准Brier", "随机Brier",
+        "V5原始LogLoss", "V5.5校准LogLoss", "随机LogLoss",
+    }
+    if not isinstance(scored_summary, pd.DataFrame) or not required_columns.issubset(scored_summary.columns):
+        return pd.DataFrame(), {
+            "status": "尚无完整的逐期评分数据",
+            "n_draws": 0,
+            "minimum_draws": int(minimum_draws),
+            "second_replication_allowed": False,
+            "production_model_change_allowed": False,
+        }
+    data = scored_summary.sort_values("目标期号").drop_duplicates("目标期号").reset_index(drop=True)
+    if len(data) < 2:
+        return pd.DataFrame(), {
+            "status": "至少需要2期已评分数据才能计算配对区块Bootstrap",
+            "n_draws": int(len(data)),
+            "minimum_draws": int(minimum_draws),
+            "second_replication_allowed": False,
+            "production_model_change_allowed": False,
+        }
+
+    metrics = [
+        ("平均命中数", "V5.5校准平均命中", "V5原始概率平均命中", "随机平均命中", False),
+        ("单注3+率", "V5.5校准单注3+率", "V5原始概率单注3+率", "随机单注3+率", False),
+        ("整批3+率", "V5.5校准整批3+", "V5原始概率整批3+", "随机整批3+", False),
+        ("Brier", "V5.5校准Brier", "V5原始Brier", "随机Brier", True),
+        ("LogLoss", "V5.5校准LogLoss", "V5原始LogLoss", "随机LogLoss", True),
+    ]
+    comparisons = [("相对原始V5", 1), ("相对均匀随机", 2)]
+    rows: list[dict[str, Any]] = []
+    p_values: list[float] = []
+    for metric_index, (metric_name, candidate_col, raw_col, random_col, lower_is_better) in enumerate(metrics):
+        for comparison_index, (comparison_name, baseline_index) in enumerate(comparisons):
+            baseline_col = raw_col if baseline_index == 1 else random_col
+            candidate = pd.to_numeric(data[candidate_col], errors="coerce").to_numpy(dtype=float)
+            baseline = pd.to_numeric(data[baseline_col], errors="coerce").to_numpy(dtype=float)
+            valid = np.isfinite(candidate) & np.isfinite(baseline)
+            candidate = candidate[valid]
+            baseline = baseline[valid]
+            if len(candidate) < 2:
+                continue
+            improvement = baseline - candidate if lower_is_better else candidate - baseline
+            result = paired_draw_bootstrap(
+                improvement,
+                np.zeros(len(improvement), dtype=float),
+                repetitions=int(repetitions),
+                block_length=int(block_length),
+                seed=int(seed) + metric_index * 10 + comparison_index,
+            )
+            p_values.append(float(result["bootstrap_p_raw"]))
+            rows.append({
+                "比较": comparison_name,
+                "指标": metric_name,
+                "开奖期数": int(result["n_draws"]),
+                "平均改善值": float(result["mean_difference"]),
+                "改善95%CI下限": float(result["ci95_lower"]),
+                "改善95%CI上限": float(result["ci95_upper"]),
+                "Bootstrap原始p值": float(result["bootstrap_p_raw"]),
+                "区块长度": int(result["block_length"]),
+            })
+    if not rows:
+        return pd.DataFrame(), {
+            "status": "没有可配对的完整逐期评分数据",
+            "n_draws": int(len(data)),
+            "minimum_draws": int(minimum_draws),
+            "second_replication_allowed": False,
+            "production_model_change_allowed": False,
+        }
+    adjusted = _holm_adjust(p_values)
+    report = pd.DataFrame(rows)
+    report["Holm校正p值"] = adjusted
+    n_draws = int(report["开奖期数"].min())
+    primary = report[
+        (report["比较"] == "相对原始V5")
+        & report["指标"].isin(["Brier", "LogLoss"])
+    ]
+    calibration_supported = bool(
+        len(primary) == 2
+        and (primary["平均改善值"] > 0).all()
+        and (primary["改善95%CI下限"] > 0).all()
+        and (primary["Holm校正p值"] < 0.05).all()
+    )
+    random_probability = report[
+        (report["比较"] == "相对均匀随机")
+        & report["指标"].isin(["Brier", "LogLoss"])
+    ]
+    beats_random_probability = bool(
+        len(random_probability) == 2
+        and (random_probability["平均改善值"] > 0).all()
+        and (random_probability["改善95%CI下限"] > 0).all()
+        and (random_probability["Holm校正p值"] < 0.05).all()
+    )
+    enough_draws = n_draws >= int(minimum_draws)
+    second_stage = bool(enough_draws and calibration_supported)
+    if not enough_draws:
+        status = f"前瞻样本不足：至少需要{int(minimum_draws)}期，目前只有{n_draws}期"
+    elif calibration_supported:
+        status = "T=2.875相对原始V5的概率评分改善达到研究门槛；只允许进入第二独立验证"
+    else:
+        status = "尚未观察到T=2.875相对原始V5稳定改善的证据"
+    gate = {
+        "status": status,
+        "n_draws": n_draws,
+        "minimum_draws": int(minimum_draws),
+        "calibration_improvement_supported_vs_raw_v5": calibration_supported,
+        "probability_scores_superior_to_uniform_random": beats_random_probability,
+        "second_independent_replication_allowed": second_stage,
+        "production_model_change_allowed": False,
+        "prediction_superiority_proven": False,
+        "multiple_comparison_method": "Holm correction across up to 10 paired metric comparisons",
+        "interval_method": "paired moving-block bootstrap over draw-level differences",
+        "block_length": int(block_length),
+        "bootstrap_repetitions": int(repetitions),
+        "warning": (
+            "即使温度组概率评分达到门槛，也只代表该前瞻区间内的概率校准改善；"
+            "不等于证明公平独立开奖的中奖概率提高，更不会自动修改正式选号模型。"
+        ),
+    }
+    return report, gate
