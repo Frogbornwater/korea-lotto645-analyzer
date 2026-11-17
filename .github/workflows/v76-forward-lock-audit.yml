@@ -1,0 +1,49 @@
+name: V7.6 frozen 1251 forward-lock audit
+
+on:
+  pull_request:
+    branches: ["main"]
+    paths:
+      - "forward_lock_commitment.py"
+      - "v52_rolling_validation.py"
+      - "scripts/v76_forward_lock_audit.py"
+      - "tests/test_v76_forward_lock_commitment.py"
+      - "data/forward_lock_commitments/draw_1251.json"
+      - "data/lotto645.csv"
+      - "lotto_core.py"
+      - "v40_governance.py"
+      - "v40_store.py"
+  push:
+    branches: ["main"]
+    paths:
+      - "data/lotto645.csv"
+      - "data/forward_lock_commitments/draw_1251.json"
+      - "forward_lock_commitment.py"
+      - "v52_rolling_validation.py"
+      - "scripts/v76_forward_lock_audit.py"
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Compile V7.6 audit and tests
+        run: python -m py_compile forward_lock_commitment.py v52_rolling_validation.py scripts/v76_forward_lock_audit.py tests/test_v76_forward_lock_commitment.py
+      - name: Run V7.6 forward-lock integrity tests
+        run: python -m unittest discover -s tests -p 'test_v76_forward_lock_commitment.py' -v
+      - name: Audit current manual history against the 1251 lock commitment
+        run: python scripts/v76_forward_lock_audit.py
+      - name: Upload V7.6 forward-lock audit report
+        uses: actions/upload-artifact@v4
+        with:
+          name: v76-forward-lock-1251-audit
+          path: artifacts/v76/
+          if-no-files-found: error
+          retention-days: 365
