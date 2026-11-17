@@ -107,14 +107,16 @@ class V55TemperatureForwardTests(unittest.TestCase):
             self.history_1251, manifest=self.commitment, ticket_count=10, master_seed=222222
         )
         event["payload"]["number_probabilities"][0]["temperature_probability"] += 0.001
-        target = event["payload"]["metadata"]["target_draw"]
-        # Event-level integrity must reject an edited lock before any scoring.
-        summary, detail, status = evaluate_v55_temperature_forward_events(self.history_1251, [event])
+        synthetic_1252 = pd.DataFrame([{
+            "draw_no": 1252, "date": "2099-01-08",
+            "n1": 7, "n2": 12, "n3": 19, "n4": 26, "n5": 34, "n6": 41,
+            "bonus": 44,
+        }])
+        completed = validate_frame(pd.concat([self.history_1251, synthetic_1252], ignore_index=True))
+        summary, detail, status = evaluate_v55_temperature_forward_events(completed, [event])
         self.assertTrue(summary.empty)
         self.assertTrue(detail.empty)
-        # A probability mismatch is checked only once the target arrives, so
-        # the pending state is still accepted until scoring becomes possible.
-        self.assertIn("等待开奖数据", status.iloc[0]["状态"])
+        self.assertIn("概率记录无效", status.iloc[0]["状态"])
 
     def test_evaluator_waits_then_scores_only_after_target_is_imported(self):
         event = build_v55_temperature_forward_event(
