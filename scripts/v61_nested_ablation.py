@@ -117,6 +117,11 @@ def summarize_variant(detail: pd.DataFrame, variant: str) -> dict:
 
 def main() -> None:
     raw = pd.read_csv(ROOT / "data" / "lotto645.csv")
+    if "draw_no" not in raw.columns:
+        raise ValueError("V6.1 数据文件缺少 draw_no 字段。")
+    # The repository contains later rounds for other workflows; explicitly
+    # isolate the pre-1050 development partition before validation and fitting.
+    raw = raw.loc[pd.to_numeric(raw["draw_no"], errors="coerce") <= DATA_LAST_DRAW].copy()
     history = validate_frame(raw).reset_index(drop=True)
     draws = history["draw_no"].to_numpy(dtype=int)
     if len(history) != DATA_LAST_DRAW - DATA_FIRST_DRAW + 1:
@@ -132,7 +137,7 @@ def main() -> None:
         fold_history = history.loc[history["draw_no"] <= end_draw].copy().reset_index(drop=True)
         if int(fold_history["draw_no"].iloc[-1]) != end_draw:
             raise RuntimeError("折末期数据缺失。")
-        for variant_index, (variant, config) in enumerate(VARIANTS.items()):
+        for variant, config in VARIANTS.items():
             result = run_v50_walk_forward(
                 fold_history,
                 test_draws=FOLD_SIZE,
