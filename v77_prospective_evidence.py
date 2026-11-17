@@ -292,6 +292,10 @@ def build_v77_evidence_report(
             )
             try:
                 expected_random_seed = int(config["seed"]) ^ 0x5A17
+                # 1251 keeps its already committed legacy control seed.
+                # Later target draws use independent deterministic seeds.
+                if target > start_draw:
+                    expected_random_seed ^= target
                 random_seed_matches = int(metadata.get("random_seed", -1)) == expected_random_seed
             except (KeyError, TypeError, ValueError):
                 random_seed_matches = False
