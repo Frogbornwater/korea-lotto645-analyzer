@@ -51,3 +51,12 @@ jobs:
           path: artifacts/v60/
           if-no-files-found: error
           retention-days: 90
+      - name: Run V6.1 nested chronological feature ablation
+        run: python scripts/v61_nested_ablation.py
+      - name: Upload V6.1 nested ablation report
+        uses: actions/upload-artifact@v4
+        with:
+          name: v61-nested-ablation
+          path: artifacts/v61/
+          if-no-files-found: error
+          retention-days: 90
