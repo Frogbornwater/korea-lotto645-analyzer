@@ -68,7 +68,9 @@ def uniform_random_expectations(tickets_per_draw: int = TICKETS_PER_DRAW) -> dic
         )
 
     return {
+        "top6_hits": 6.0 * 6.0 / 45.0,
         "top10_hits": 10.0 * 6.0 / 45.0,
+        "top15_hits": 15.0 * 6.0 / 45.0,
         "mean_hits": 6.0 * 6.0 / 45.0,
         "ticket_3plus": ticket_probability_at_least(3),
         "ticket_4plus": ticket_probability_at_least(4),
@@ -118,10 +120,16 @@ def _draw_metrics(row: dict) -> dict[str, float]:
         "random_LogLoss": float(-(6/45)*np.log(6/45) -(39/45)*np.log(39/45)),
         # Exact analytical expectations prevent a single seeded Monte Carlo
         # control from being mistaken for the theoretical uniform baseline.
+        "uniform_top6_expected": uniform_random_expectations()["top6_hits"],
         "uniform_top10_expected": uniform_random_expectations()["top10_hits"],
+        "uniform_top15_expected": uniform_random_expectations()["top15_hits"],
+        "uniform_Brier_expected": uniform_random_expectations()["Brier"],
+        "uniform_LogLoss_expected": uniform_random_expectations()["LogLoss"],
         "uniform_mean_hits_expected": uniform_random_expectations()["mean_hits"],
         "uniform_ticket_3plus_expected": uniform_random_expectations()["ticket_3plus"],
+        "uniform_ticket_4plus_expected": uniform_random_expectations()["ticket_4plus"],
         "uniform_batch_3plus_expected": uniform_random_expectations()["batch_3plus"],
+        "uniform_batch_4plus_expected": uniform_random_expectations()["batch_4plus"],
     }
 
 
@@ -278,44 +286,58 @@ def run_research(frame: pd.DataFrame) -> dict:
     if len(selected) != TARGET_DRAWS or selected["target_draw"].tolist() != expected_targets:
         raise RuntimeError("V7.2最终逐期选择结果不是完整的最近500期。")
 
-    summaries = []
-    compare_specs = [
-        ("top10_hits", "uniform_top10_expected", "higher"),
-        ("Brier", "random_Brier", "lower"),
-        ("LogLoss", "random_LogLoss", "lower"),
-        ("mean_hits", "uniform_mean_hits_expected", "higher"),
-        ("ticket_3plus", "uniform_ticket_3plus_expected", "higher"),
-        ("batch_3plus", "uniform_batch_3plus_expected", "higher"),
-    ]
-    for idx, (metric, control, direction) in enumerate(compare_specs):
-        diff = selected[metric].to_numpy(float) - selected[control].to_numpy(float)
-        if direction == "lower":
-            diff = -diff
-        low, high = moving_block_ci(diff, MASTER_SEED + idx * 101)
-        summaries.append({
-            "metric": metric,
-            "direction": direction,
-            "selected_prequential_mean": float(selected[metric].mean()),
-            "control_mean": float(selected[control].mean()),
-            "improvement_positive_is_better": float(diff.mean()),
-            "moving_block_bootstrap_95ci_low": low,
-            "moving_block_bootstrap_95ci_high": high,
-            "draws_better": int(np.sum(diff > 0)),
-            "draws_worse": int(np.sum(diff < 0)),
-            "draws_tied": int(np.sum(diff == 0)),
-        })
+    def compare_to_uniform(frame: pd.DataFrame, seed_offset: int) -> list[dict]:
+        specs = [
+            ("top6_hits", "uniform_top6_expected", "higher"),
+            ("top10_hits", "uniform_top10_expected", "higher"),
+            ("top15_hits", "uniform_top15_expected", "higher"),
+            ("Brier", "uniform_Brier_expected", "lower"),
+            ("LogLoss", "uniform_LogLoss_expected", "lower"),
+            ("mean_hits", "uniform_mean_hits_expected", "higher"),
+            ("ticket_3plus", "uniform_ticket_3plus_expected", "higher"),
+            ("ticket_4plus", "uniform_ticket_4plus_expected", "higher"),
+            ("batch_3plus", "uniform_batch_3plus_expected", "higher"),
+            ("batch_4plus", "uniform_batch_4plus_expected", "higher"),
+        ]
+        results = []
+        for idx, (metric, control, direction) in enumerate(specs):
+            diff = frame[metric].to_numpy(float) - frame[control].to_numpy(float)
+            if direction == "lower":
+                diff = -diff
+            low, high = moving_block_ci(diff, MASTER_SEED + seed_offset + idx * 101)
+            results.append({
+                "metric": metric,
+                "direction": direction,
+                "model_mean": float(frame[metric].mean()),
+                "uniform_exact_mean": float(frame[control].mean()),
+                "improvement_positive_is_better": float(diff.mean()),
+                "moving_block_bootstrap_95ci_low": low,
+                "moving_block_bootstrap_95ci_high": high,
+                "draws_better": int(np.sum(diff > 0)),
+                "draws_worse": int(np.sum(diff < 0)),
+                "draws_tied": int(np.sum(diff == 0)),
+            })
+        return results
+
+    selected_vs_uniform = compare_to_uniform(selected, 0)
+    fixed_vs_uniform = compare_to_uniform(baseline, 3001)
 
     # Compare adaptive selection with the fixed V5 baseline on the exact same targets.
-    for idx, metric in enumerate(("top10_hits", "Brier", "LogLoss", "mean_hits", "ticket_3plus", "batch_3plus")):
+    paired_specs = (
+        "top6_hits", "top10_hits", "top15_hits", "Brier", "LogLoss",
+        "mean_hits", "ticket_3plus", "ticket_4plus", "batch_3plus", "batch_4plus",
+    )
+    adaptive_vs_fixed = []
+    for idx, metric in enumerate(paired_specs):
         diff = selected[metric].to_numpy(float) - baseline[metric].to_numpy(float)
         if metric in ("Brier", "LogLoss"):
             diff = -diff
-        low, high = moving_block_ci(diff, MASTER_SEED + 2001 + idx * 101)
-        summaries.append({
+        low, high = moving_block_ci(diff, MASTER_SEED + 6001 + idx * 101)
+        adaptive_vs_fixed.append({
             "metric": f"adaptive_vs_fixed_{metric}",
             "direction": "higher_is_better_after_sign_adjustment",
-            "selected_prequential_mean": float(selected[metric].mean()),
-            "control_mean": float(baseline[metric].mean()),
+            "adaptive_mean": float(selected[metric].mean()),
+            "fixed_baseline_mean": float(baseline[metric].mean()),
             "improvement_positive_is_better": float(diff.mean()),
             "moving_block_bootstrap_95ci_low": low,
             "moving_block_bootstrap_95ci_high": high,
@@ -369,8 +391,9 @@ def run_research(frame: pd.DataFrame) -> dict:
             "note": "Single deterministic Monte Carlo seed; retained as a diagnostic only, not used as the primary inferential comparator.",
         },
         "block_reports": block_reports,
-        "selected_prequential_vs_random": summaries[:6],
-        "selected_prequential_vs_fixed_baseline": summaries[6:],
+        "selected_prequential_vs_random": selected_vs_uniform,
+        "fixed_baseline_vs_random": fixed_vs_uniform,
+        "selected_prequential_vs_fixed_baseline": adaptive_vs_fixed,
         "candidate_full_window_ranking": candidate_summary.to_dict(orient="records"),
         "data_fingerprint_sha256": fingerprint,
         "limitations": [
