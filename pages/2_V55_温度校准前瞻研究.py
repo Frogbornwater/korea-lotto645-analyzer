@@ -18,6 +18,7 @@ from v55_forward_temperature import (
     build_v55_temperature_forward_event,
     check_frozen_base_history,
     evaluate_v55_temperature_forward_events,
+    aggregate_v55_temperature_forward_evidence,
     load_commitment,
     persist_hash_only_commitment,
     verify_persisted_hash_only_commitment,
@@ -337,6 +338,20 @@ if events:
                 mime="text/csv",
                 key="v77_download_temperature_detail",
             )
+            st.markdown("#### 多期配对Bootstrap与Holm校正")
+            aggregate_report, aggregate_gate = aggregate_v55_temperature_forward_evidence(summary)
+            st.write(aggregate_gate)
+            if not aggregate_report.empty:
+                st.dataframe(aggregate_report.round(8), hide_index=True, use_container_width=True)
+                st.download_button(
+                    "下载V5.5多期统计审计CSV",
+                    data=aggregate_report.to_csv(index=False).encode("utf-8-sig"),
+                    file_name="lotto645_v55_temperature_forward_evidence.csv",
+                    mime="text/csv",
+                    key="v77_download_temperature_evidence",
+                )
+            else:
+                st.info(aggregate_gate.get("status", "多期前瞻样本尚未达到统计要求。"))
         elif status.empty and not verified_events:
             st.info("没有通过公开哈希承诺核验的锁定事件，因此暂不计算前瞻评分。")
         elif status.empty:
