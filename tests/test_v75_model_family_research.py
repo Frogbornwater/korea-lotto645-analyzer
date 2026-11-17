@@ -19,6 +19,18 @@ class V75ModelFamilyResearchTests(unittest.TestCase):
         self.assertIn(V5_BASELINE_KEY, CONFIG_BY_KEY)
         self.assertIn(UNIFORM_KEY, CONFIG_BY_KEY)
 
+    def test_candidate_family_counts_are_explicit(self):
+        counts = {}
+        for config in CONFIGS:
+            counts[config["family"]] = counts.get(config["family"], 0) + 1
+        self.assertEqual(counts, {
+            "uniform": 1,
+            "v4_long_frequency": 1,
+            "rolling_frequency": 10,
+            "exponential_frequency": 10,
+            "v5_ridge": 9,
+        })
+
     def test_rolling_and_exponential_frequency_probabilities_sum_to_six(self):
         rng = np.random.default_rng(2026)
         matrix = np.vstack([rng.choice(np.arange(1, 46), size=6, replace=False) for _ in range(300)])
