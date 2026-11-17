@@ -43,7 +43,7 @@ CONFIGS = tuple(
     )
 )
 BASELINE = {"training_window": 500, "ridge_alpha": 1.0, "pair_strength": 0.5}
-PRIMARY_METRICS = ("top10_hits", "Brier", "LogLoss", "mean_hits", "ticket_3plus", "batch_3plus")
+PRIMARY_METRICS = ("top6_hits", "top10_hits", "top15_hits", "Brier", "LogLoss", "mean_hits", "ticket_3plus", "ticket_4plus", "batch_3plus", "batch_4plus")
 
 
 def _decode_numbers(value: str) -> list[int]:
@@ -80,6 +80,9 @@ def uniform_random_expectations(tickets_per_draw: int = TICKETS_PER_DRAW) -> dic
         "LogLoss": -(6.0 / 45.0) * np.log(6.0 / 45.0)
                    -(39.0 / 45.0) * np.log(39.0 / 45.0),
     }
+
+
+UNIFORM_BASELINES = uniform_random_expectations()
 
 
 def _draw_metrics(row: dict) -> dict[str, float]:
@@ -120,16 +123,16 @@ def _draw_metrics(row: dict) -> dict[str, float]:
         "random_LogLoss": float(-(6/45)*np.log(6/45) -(39/45)*np.log(39/45)),
         # Exact analytical expectations prevent a single seeded Monte Carlo
         # control from being mistaken for the theoretical uniform baseline.
-        "uniform_top6_expected": uniform_random_expectations()["top6_hits"],
-        "uniform_top10_expected": uniform_random_expectations()["top10_hits"],
-        "uniform_top15_expected": uniform_random_expectations()["top15_hits"],
-        "uniform_Brier_expected": uniform_random_expectations()["Brier"],
-        "uniform_LogLoss_expected": uniform_random_expectations()["LogLoss"],
-        "uniform_mean_hits_expected": uniform_random_expectations()["mean_hits"],
-        "uniform_ticket_3plus_expected": uniform_random_expectations()["ticket_3plus"],
-        "uniform_ticket_4plus_expected": uniform_random_expectations()["ticket_4plus"],
-        "uniform_batch_3plus_expected": uniform_random_expectations()["batch_3plus"],
-        "uniform_batch_4plus_expected": uniform_random_expectations()["batch_4plus"],
+        "uniform_top6_expected": UNIFORM_BASELINES["top6_hits"],
+        "uniform_top10_expected": UNIFORM_BASELINES["top10_hits"],
+        "uniform_top15_expected": UNIFORM_BASELINES["top15_hits"],
+        "uniform_Brier_expected": UNIFORM_BASELINES["Brier"],
+        "uniform_LogLoss_expected": UNIFORM_BASELINES["LogLoss"],
+        "uniform_mean_hits_expected": UNIFORM_BASELINES["mean_hits"],
+        "uniform_ticket_3plus_expected": UNIFORM_BASELINES["ticket_3plus"],
+        "uniform_ticket_4plus_expected": UNIFORM_BASELINES["ticket_4plus"],
+        "uniform_batch_3plus_expected": UNIFORM_BASELINES["batch_3plus"],
+        "uniform_batch_4plus_expected": UNIFORM_BASELINES["batch_4plus"],
     }
 
 
@@ -347,7 +350,9 @@ def run_research(frame: pd.DataFrame) -> dict:
         })
 
     candidate_summary = candidates.groupby("config_key").agg(
+        top6_hits=("top6_hits", "mean"),
         top10_hits=("top10_hits", "mean"),
+        top15_hits=("top15_hits", "mean"),
         Brier=("Brier", "mean"),
         LogLoss=("LogLoss", "mean"),
         mean_hits=("mean_hits", "mean"),
