@@ -34,6 +34,40 @@ def make_summary(start=V77_START_DRAW, count=50, hit_delta=0.05):
         })
     return pd.DataFrame(rows)
 
+def make_lock_events(start=V77_START_DRAW, count=50):
+    config = {
+        "model": "V5.1联合概率选号",
+        "engine_version": "5.0.0-predictive-research",
+        "training_window": 500,
+        "ridge_alpha": 1.0,
+        "pair_strength": 0.5,
+        "requested_overlap": 4,
+        "effective_overlap": 4,
+        "ticket_count": 10,
+        "seed": 5050,
+    }
+    events = []
+    for offset in range(count):
+        draw_no = start + offset
+        events.append({
+            "event_type": "v51_forward_lock",
+            "payload": {
+                "metadata": {
+                    "target_draw": draw_no,
+                    "engine_version": config["engine_version"],
+                    "training_window": config["training_window"],
+                    "ridge_alpha": config["ridge_alpha"],
+                    "pair_strength": config["pair_strength"],
+                    "requested_overlap": config["requested_overlap"],
+                    "ticket_count": config["ticket_count"],
+                    "seed": config["seed"],
+                    "random_seed": config["seed"] ^ 0x5A17,
+                },
+                "configuration": dict(config),
+            },
+        })
+    return events
+
 
 class V77ProspectiveEvidenceTests(unittest.TestCase):
     def test_empty_and_partial_windows_are_descriptive_only(self):
@@ -46,6 +80,7 @@ class V77ProspectiveEvidenceTests(unittest.TestCase):
     def test_complete_fixed_window_runs_one_primary_bootstrap_interval(self):
         report, per_draw, metrics = build_v77_evidence_report(
             make_summary(hit_delta=0.05),
+            lock_events=make_lock_events(),
             bootstrap_repetitions=500,
         )
         self.assertTrue(report["analysis_ready"])
@@ -81,6 +116,7 @@ class V77ProspectiveEvidenceTests(unittest.TestCase):
         source = pd.concat([source, outside], ignore_index=True)
         report, per_draw, _ = build_v77_evidence_report(
             source,
+            lock_events=make_lock_events() + make_lock_events(start=V77_END_DRAW + 1, count=1),
             bootstrap_repetitions=500,
         )
         self.assertTrue(report["analysis_ready"])
@@ -103,6 +139,28 @@ class V77ProspectiveEvidenceTests(unittest.TestCase):
         self.assertEqual(report["scored_unique_draws"], 49)
         self.assertNotIn(V77_START_DRAW, per_draw["目标期号"].tolist())
 
+    def test_model_configuration_must_match_committed_1251_lock(self):
+        events = make_lock_events()
+        events[1]["payload"]["configuration"]["pair_strength"] = 1.0
+        report, _, _ = build_v77_evidence_report(
+            make_summary(count=50),
+            lock_events=events,
+            bootstrap_repetitions=500,
+        )
+        self.assertFalse(report["analysis_ready"])
+        self.assertEqual(report["status"], "protocol_violation_configuration_mismatch")
+        self.assertEqual(report["configuration_mismatch_draws"], [V77_START_DRAW + 1])
+        self.assertIsNone(report["primary_endpoint"]["bootstrap_95_ci"])
+
+    def test_all_target_draws_need_a_lock_record(self):
+        report, _, _ = build_v77_evidence_report(
+            make_summary(count=50),
+            lock_events=make_lock_events(count=49),
+            bootstrap_repetitions=500,
+        )
+        self.assertFalse(report["analysis_ready"])
+        self.assertEqual(report["missing_lock_draws"], [V77_END_DRAW])
+
     def test_invalid_metric_ranges_are_rejected(self):
         source = make_summary(count=2)
         source.loc[0, "V5.1单注3+率"] = 1.5
@@ -117,8 +175,9 @@ class V77ProspectiveEvidenceTests(unittest.TestCase):
 
     def test_bootstrap_is_deterministic(self):
         source = make_summary(hit_delta=0.02)
-        report_a, _, _ = build_v77_evidence_report(source, bootstrap_repetitions=500, bootstrap_seed=12)
-        report_b, _, _ = build_v77_evidence_report(source, bootstrap_repetitions=500, bootstrap_seed=12)
+        locks = make_lock_events()
+        report_a, _, _ = build_v77_evidence_report(source, lock_events=locks, bootstrap_repetitions=500, bootstrap_seed=12)
+        report_b, _, _ = build_v77_evidence_report(source, lock_events=locks, bootstrap_repetitions=500, bootstrap_seed=12)
         self.assertEqual(
             report_a["primary_endpoint"]["bootstrap_95_ci"],
             report_b["primary_endpoint"]["bootstrap_95_ci"],
