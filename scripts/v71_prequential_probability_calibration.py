@@ -125,8 +125,16 @@ def run_audit(detail: pd.DataFrame) -> dict:
         })
 
     result = pd.DataFrame(records)
-    if len(result) != 200 or (result["calibration_training_draws"] >= result["target_draw"]).any():
-        raise RuntimeError("V7.1校准训练发生期号泄漏或目标期数量错误。")
+    if len(result) != 200 or result["target_draw"].nunique() != 200:
+        raise RuntimeError("V7.1目标期数量错误。")
+    for report in fold_reports:
+        start = report["target_range"][0]
+        training_range = report["calibration_training_range"]
+        if training_range is not None and training_range[1] >= start:
+            raise RuntimeError("V7.1校准训练包含当前折或未来目标期，检测到时间泄漏。")
+        expected_prior = start - FOLDS[0][0]
+        if report["calibration_training_draws"] != expected_prior:
+            raise RuntimeError("V7.1校准训练样本数与严格历史前缀不一致。")
 
     summary = []
     raw_p = {}
