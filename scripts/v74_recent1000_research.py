@@ -162,9 +162,12 @@ def config_key(config: dict) -> str:
     return f"w{int(config['training_window'])}_a{float(config['ridge_alpha']):g}_p{float(config['pair_strength']):g}"
 
 
-def moving_block_ci(values: np.ndarray, seed: int) -> tuple[float, float]:
+def moving_block_ci(values: np.ndarray, seed: int, alpha: float = 0.05) -> tuple[float, float]:
     x = np.asarray(values, dtype=float)
     n = len(x)
+    alpha = float(alpha)
+    if not 0.0 < alpha < 1.0:
+        raise ValueError("alpha必须位于(0, 1)。")
     if n < 2:
         return float("nan"), float("nan")
     rng = np.random.default_rng(seed)
@@ -174,7 +177,7 @@ def moving_block_ci(values: np.ndarray, seed: int) -> tuple[float, float]:
     indices = (starts[:, :, None] + offsets[None, None, :]) % n
     samples = x[indices.reshape(BOOTSTRAP_REPS, -1)[:, :n]]
     means = samples.mean(axis=1)
-    return float(np.quantile(means, .025)), float(np.quantile(means, .975))
+    return float(np.quantile(means, alpha / 2.0)), float(np.quantile(means, 1.0 - alpha / 2.0))
 
 
 def run_research(frame: pd.DataFrame) -> dict:
@@ -312,7 +315,7 @@ def run_research(frame: pd.DataFrame) -> dict:
             diff = frame[metric].to_numpy(float) - frame[control].to_numpy(float)
             if direction == "lower":
                 diff = -diff
-            low, high = moving_block_ci(diff, MASTER_SEED + seed_offset + idx * 101)
+            low, high = moving_block_ci(diff, MASTER_SEED + seed_offset + idx * 101, alpha=0.05 / len(specs))
             results.append({
                 "metric": metric,
                 "direction": direction,
@@ -340,7 +343,7 @@ def run_research(frame: pd.DataFrame) -> dict:
         diff = selected[metric].to_numpy(float) - baseline[metric].to_numpy(float)
         if metric in ("Brier", "LogLoss"):
             diff = -diff
-        low, high = moving_block_ci(diff, MASTER_SEED + 6001 + idx * 101)
+        low, high = moving_block_ci(diff, MASTER_SEED + 6001 + idx * 101, alpha=0.05 / len(paired_specs))
         adaptive_vs_fixed.append({
             "metric": f"adaptive_vs_fixed_{metric}",
             "direction": "higher_is_better_after_sign_adjustment",
@@ -394,7 +397,7 @@ def run_research(frame: pd.DataFrame) -> dict:
         "selected_model_training_draws_range": [int(selected["training_draws"].min()), int(selected["training_draws"].max())],
         "selection": "Each 100-draw block selects from completed earlier blocks only using mean rank across Top10, Brier, LogLoss, and mean ticket hits; first block uses the preregistered V5 baseline.",
         "primary_metrics": list(PRIMARY_METRICS),
-        "uncertainty": f"{BOOTSTRAP_REPS} moving-block bootstrap replicates, block length {BLOCK_BOOTSTRAP_LENGTH}",
+        "uncertainty": f"{BOOTSTRAP_REPS} moving-block bootstrap replicates, block length {BLOCK_BOOTSTRAP_LENGTH}; Bonferroni family-wise 95% interval across 10 metrics per comparison family (per-metric alpha=0.005)",
         "uniform_random_baseline_exact": uniform_random_expectations(),
         "seeded_random_control_diagnostic_only": {
             "mean_hits": float(selected["random_mean_hits"].mean()),
