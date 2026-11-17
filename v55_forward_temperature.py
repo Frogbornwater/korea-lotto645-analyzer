@@ -192,7 +192,7 @@ def build_v55_temperature_forward_event(
     random_seed = _derived_seed(master_seed, target_draw, 7703)
 
     raw_tickets = generate_tickets(
-        raw_probabilities, pair_scores, int(ticket_count), raw_seed, pair_strength=0.5
+        raw_probabilities, pair_scores, int(ticket_count), paired_model_seed, pair_strength=0.5
     )
     calibrated_tickets = generate_tickets(
         calibrated_probabilities, pair_scores, int(ticket_count), paired_model_seed, pair_strength=0.5
@@ -295,6 +295,9 @@ def evaluate_v55_temperature_forward_events(
     status_rows: list[dict[str, Any]] = []
     detail_rows: list[dict[str, Any]] = []
     summary_rows: list[dict[str, Any]] = []
+    frozen_commitment = load_commitment()
+    frozen_lock = frozen_commitment["temperature_lock"]
+    frozen_source = frozen_commitment["source_artifact"]
 
     for raw_event in events:
         if not isinstance(raw_event, dict) or raw_event.get("event_type") != EVENT_TYPE:
@@ -316,6 +319,22 @@ def evaluate_v55_temperature_forward_events(
             "事件ID": event["event_id"],
         }
         expected_fingerprint = str(metadata.get("history_numeric_fingerprint_sha256", ""))
+        provenance_matches = (
+            float(metadata.get("temperature", -1)) == EXPECTED_TEMPERATURE
+            and int(metadata.get("base_temperature_draw", -1)) == EXPECTED_BASE_DRAW
+            and metadata.get("base_temperature_history_sha256") == EXPECTED_BASE_FINGERPRINT
+            and metadata.get("temperature_lock_id") == frozen_commitment["lock_id"]
+            and metadata.get("temperature_lock_file_sha256") == frozen_source["forward_temperature_lock_sha256"]
+            and metadata.get("source_artifact_zip_sha256") == frozen_source["artifact_zip_sha256"]
+            and int(metadata.get("training_window", -1)) == int(frozen_lock["training_window"])
+            and float(metadata.get("ridge_alpha", -1)) == float(frozen_lock["ridge_alpha"])
+            and float(metadata.get("pair_strength", -1)) == 0.5
+            and payload.get("research_only") is True
+            and payload.get("production_model_changed") is False
+        )
+        if not provenance_matches:
+            status_rows.append({**base, "状态": "拒绝评分：冻结温度来源或配置被修改"})
+            continue
         if target_draw != history_last + 1 or event.get("data_fingerprint_sha256") != expected_fingerprint:
             status_rows.append({**base, "状态": "拒绝评分：目标期或锁定事件指纹无效"})
             continue
@@ -354,19 +373,30 @@ def evaluate_v55_temperature_forward_events(
             for vector in (raw_p, temp_p, uniform_p):
                 if not np.all(np.isfinite(vector)) or np.any(vector <= 0) or not np.isclose(vector.sum(), 6.0, atol=1e-5):
                     raise ValueError("概率向量无效")
+            expected_temp_p = transform(raw_p, EXPECTED_TEMPERATURE)
+            expected_uniform_p = np.full(45, 6.0 / 45.0, dtype=float)
+            if not np.allclose(temp_p, expected_temp_p, rtol=1e-9, atol=1e-11):
+                raise ValueError("温度校准概率与冻结T=2.875不一致")
+            if not np.allclose(uniform_p, expected_uniform_p, rtol=0.0, atol=1e-12):
+                raise ValueError("均匀随机概率向量被修改")
         except (KeyError, TypeError, ValueError):
             status_rows.append({**base, "状态": "拒绝评分：45维概率记录无效"})
             continue
 
         groups: dict[str, list[int]] = {}
+        ticket_seeds: dict[str, set[int]] = {}
+        ticket_numbers: dict[str, set[tuple[int, ...]]] = {}
         valid = True
         for record in tickets:
             try:
                 strategy = str(record["策略"])
                 ticket = [int(record[f"n{i}"]) for i in range(1, 7)]
                 ticket_no = int(record["注序"])
+                ticket_seed = int(record["seed"])
                 if len(set(ticket)) != 6 or any(value < 1 or value > 45 for value in ticket):
                     raise ValueError("号码无效")
+                ticket_seeds.setdefault(strategy, set()).add(ticket_seed)
+                ticket_numbers.setdefault(strategy, set()).add(tuple(sorted(ticket)))
             except (KeyError, TypeError, ValueError):
                 valid = False
                 break
@@ -383,8 +413,22 @@ def evaluate_v55_temperature_forward_events(
             })
         expected_groups = {RAW_STRATEGY, TEMPERATURE_STRATEGY, RANDOM_STRATEGY}
         count = int(metadata.get("ticket_count_per_strategy", 0))
-        if not valid or set(groups) != expected_groups or any(len(groups[name]) != count for name in expected_groups):
-            status_rows.append({**base, "状态": "拒绝评分：三组锁定号码明细不完整"})
+        paired_seeds_match = (
+            len(ticket_seeds.get(RAW_STRATEGY, set())) == 1
+            and ticket_seeds.get(RAW_STRATEGY) == ticket_seeds.get(TEMPERATURE_STRATEGY)
+            and len(ticket_seeds.get(RANDOM_STRATEGY, set())) == 1
+        )
+        no_duplicate_tickets = all(
+            len(ticket_numbers.get(name, set())) == count for name in expected_groups
+        )
+        if (
+            not valid
+            or set(groups) != expected_groups
+            or any(len(groups[name]) != count for name in expected_groups)
+            or not paired_seeds_match
+            or not no_duplicate_tickets
+        ):
+            status_rows.append({**base, "状态": "拒绝评分：三组锁定号码、配对随机种子或去重完整性无效"})
             continue
 
         actual_vector = np.zeros(45, dtype=float)
