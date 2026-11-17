@@ -138,9 +138,13 @@ def main() -> None:
                 "随机_LogLoss": float(row["随机_LogLoss"]),
             }
             for key, value in v5m.items():
-                rec[f"V5_{key}"] = value
+                if key.startswith("random_"):
+                    rec[key] = value
+                else:
+                    rec[f"V5_{key}"] = value
             for key, value in v4m.items():
-                rec[f"V4_{key}"] = value
+                if not key.startswith("random_"):
+                    rec[f"V4_{key}"] = value
             records.append(rec)
         parts.append(pd.DataFrame(records))
         fold_meta.append({
