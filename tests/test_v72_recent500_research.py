@@ -4,7 +4,7 @@ import unittest
 import pandas as pd
 
 from scripts.v72_recent500_research import (
-    BASELINE, CONFIGS, _rank_configurations, config_key, moving_block_ci,
+    BASELINE, CONFIGS, _rank_configurations, config_key, moving_block_ci, uniform_random_expectations,
 )
 
 
@@ -30,6 +30,15 @@ class V72Recent500ResearchTests(unittest.TestCase):
         chosen, ranking = _rank_configurations(pd.DataFrame(rows))
         self.assertEqual(config_key(chosen), "w500_a1_p0.5")
         self.assertEqual(len(ranking), 2)
+
+    def test_uniform_baselines_are_exact_6_of_45_expectations(self):
+        baseline = uniform_random_expectations(10)
+        self.assertAlmostEqual(baseline["top10_hits"], 4.0 / 3.0, places=12)
+        self.assertAlmostEqual(baseline["mean_hits"], 0.8, places=12)
+        self.assertAlmostEqual(baseline["ticket_3plus"], 0.023834078570323606, places=12)
+        self.assertAlmostEqual(baseline["batch_3plus"], 0.21433688902346237, places=12)
+        self.assertAlmostEqual(baseline["ticket_4plus"], 0.0013934826753885176, places=12)
+        self.assertAlmostEqual(baseline["batch_4plus"], 0.013847777540374473, places=12)
 
     def test_block_bootstrap_is_reproducible(self):
         values = pd.Series([0.0, 1.0, -1.0, 0.5] * 20).to_numpy()
