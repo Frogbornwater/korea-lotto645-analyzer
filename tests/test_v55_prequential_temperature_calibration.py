@@ -1,6 +1,6 @@
 import unittest
 import numpy as np
-from scripts.v55_prequential_temperature_calibration import transform, select_temperature, mean_logloss
+from scripts.v55_prequential_temperature_calibration import transform, select_temperature, mean_logloss, TEMPERATURE_GRID
 
 class TemperatureCalibrationTests(unittest.TestCase):
     def test_transform_preserves_six_expected_inclusions(self):
@@ -23,7 +23,11 @@ class TemperatureCalibrationTests(unittest.TestCase):
         b=select_temperature(p,y)
         self.assertEqual(a["temperature"],b["temperature"])
         self.assertGreater(a["temperature"],0)
-        self.assertEqual(len(a["grid"]),61)
+        self.assertEqual(len(a["grid"]),len(TEMPERATURE_GRID))
+        self.assertEqual(len(a["grid"]),151)
+        self.assertEqual(a["grid"][0],0.25)
+        self.assertEqual(a["grid"][-1],4.0)
+        self.assertIn("grid_boundary_optimum",a)
 
     def test_mean_logloss_rejects_wrong_shape(self):
         with self.assertRaises(ValueError):

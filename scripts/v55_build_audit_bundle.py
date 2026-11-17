@@ -22,15 +22,23 @@ from scripts.v55_prequential_temperature_calibration import outcome_vector
 from scripts.v55_prequential_temperature_calibration import RIDGE_ALPHA, TRAINING_WINDOW, MIN_HISTORY
 from scripts.v55_prequential_temperature_calibration import CALIBRATION_DRAWS
 from scripts.v55_prequential_temperature_calibration import TEMPERATURE_GRID
-from scripts.v55_prequential_temperature_calibration import transform
 from scripts.v55_prequential_temperature_calibration import run_experiment
 from scripts.v55_ridge_calibration_diagnostics import run_diagnostics
 
 def sha256_bytes(payload: bytes) -> str:
     return hashlib.sha256(payload).hexdigest()
 
-def build_forward_lock(frame: pd.DataFrame) -> dict:
+def canonical_history(frame: pd.DataFrame) -> pd.DataFrame:
+    """One normalized, sorted, deduplicated representation for all fingerprints."""
     clean=validate_frame(frame).reset_index(drop=True)
+    return clean
+
+def canonical_history_sha256(frame: pd.DataFrame) -> str:
+    clean=canonical_history(frame)
+    return sha256_bytes(clean.to_csv(index=False).encode("utf-8"))
+
+def build_forward_lock(frame: pd.DataFrame) -> dict:
+    clean=canonical_history(frame)
     draws=clean["draw_no"].to_numpy(dtype=int)
     matrix=clean[NUMBER_COLS].to_numpy(dtype=np.int16,copy=True)
     if len(clean)<MIN_HISTORY+30+CALIBRATION_DRAWS:
@@ -44,19 +52,22 @@ def build_forward_lock(frame: pd.DataFrame) -> dict:
         p,_,_=_fit_from_feature_cache(matrix,cache,i,TRAINING_WINDOW,RIDGE_ALPHA)
         probabilities.append(p); outcomes.append(outcome_vector(matrix[i]))
     selected=select_temperature(np.vstack(probabilities),np.vstack(outcomes))
-    canonical=clean.to_csv(index=False).encode("utf-8")
     return {
-      "lock_version":"v55-temperature-lock-1",
+      "lock_version":"v55-temperature-lock-2",
       "method":"scalar temperature scaling on 50 strictly prequential historical forecasts",
       "temperature":selected["temperature"],
       "calibration_log_loss":selected["calibration_log_loss"],
       "raw_calibration_log_loss":selected["raw_calibration_log_loss"],
+      "temperature_grid_min":selected["grid_min"],
+      "temperature_grid_max":selected["grid_max"],
+      "grid_boundary_optimum":selected["grid_boundary_optimum"],
+      "grid_status":selected["grid_status"],
       "calibration_draws":CALIBRATION_DRAWS,
       "calibration_first_draw":int(draws[start]),
       "calibration_last_draw":int(draws[-1]),
       "base_last_draw":int(draws[-1]),
       "base_row_count":int(len(clean)),
-      "history_sha256":sha256_bytes(canonical),
+      "history_sha256":canonical_history_sha256(clean),
       "training_window":TRAINING_WINDOW,
       "ridge_alpha":RIDGE_ALPHA,
       "temperature_grid":list(TEMPERATURE_GRID),
@@ -70,11 +81,10 @@ def write_json(path: Path, value: dict) -> None:
 
 def main():
     OUT.mkdir(parents=True,exist_ok=True)
-    history=pd.read_csv(ROOT/"data"/"lotto645.csv")
-    ridge_path=OUT/"ridge_reliability_report.json"
-    temp_path=OUT/"temperature_retrospective_report.json"
-    ridge=json.loads(ridge_path.read_text(encoding="utf-8")) if ridge_path.exists() else run_diagnostics(history)
-    temp=json.loads(temp_path.read_text(encoding="utf-8")) if temp_path.exists() else run_experiment(history)
+    raw_history=pd.read_csv(ROOT/"data"/"lotto645.csv")
+    history=canonical_history(raw_history)
+    ridge=run_diagnostics(history)
+    temp=run_experiment(history)
     lock=build_forward_lock(history)
     write_json(OUT/"ridge_reliability_report.json",ridge)
     write_json(OUT/"temperature_retrospective_report.json",temp)
@@ -91,16 +101,18 @@ def main():
       "report_bundle":"V5.5 Ridge, reliability, temperature calibration and forward lock",
       "data_first_draw":int(history.draw_no.min()),"data_last_draw":int(history.draw_no.max()),
       "data_rows":int(len(history)),
-      "data_sha256":sha256_bytes(history.to_csv(index=False).encode("utf-8")),
+      "data_sha256":canonical_history_sha256(history),
+      "fingerprint_canonicalization":"lotto_core.validate_frame -> COLUMNS order -> normalized dates -> sorted unique draw_no -> UTF-8 CSV",
       "files":{p.name:{"sha256":sha256_bytes(p.read_bytes()),"bytes":p.stat().st_size} for p in files},
       "limitations":[
         "The retrospective 50-draw evaluation may overlap earlier project work and is not independent prospective evidence.",
         "The forward temperature lock is calibrated on the latest 50 historical prequential predictions and applies only after its base_last_draw.",
+        "Temperature grid boundary optima are flagged and require a wider search; they are not accepted as settled optima.",
         "No production model settings are changed by generating this report.",
         "All lottery history is manually supplied; no official lottery website, API, scraping or automatic synchronization is accessed."
       ]
     }
     write_json(OUT/"manifest.json",manifest)
-    print(json.dumps({"output_dir":str(OUT.relative_to(ROOT)),"manifest":manifest},ensure_ascii=False,indent=2))
+    print(json.dumps({"output_dir":str(OUT.relative_to(ROOT)),"manifest":manifest,"forward_lock":lock},ensure_ascii=False,indent=2))
 
 if __name__=="__main__": main()
