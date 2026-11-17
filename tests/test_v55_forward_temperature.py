@@ -22,6 +22,7 @@ from v55_forward_temperature import (
     evaluate_v55_temperature_forward_events,
     load_commitment,
     verify_commitment,
+    verify_hash_only_manifest,
 )
 
 
@@ -101,6 +102,12 @@ class V55TemperatureForwardTests(unittest.TestCase):
         self.assertNotIn("number_probabilities", serialized)
         self.assertNotIn("tickets", serialized)
         self.assertNotIn("n1", serialized)
+        verified = verify_hash_only_manifest(event, manifest)
+        self.assertTrue(verified["verified"])
+        tampered = __import__("json").loads(__import__("json").dumps(event))
+        original_n1 = int(tampered["payload"]["tickets"][0]["n1"])
+        tampered["payload"]["tickets"][0]["n1"] = 45 if original_n1 != 45 else 44
+        self.assertFalse(verify_hash_only_manifest(tampered, manifest)["verified"])
 
     def test_evaluator_rejects_modified_temperature_probabilities(self):
         event = build_v55_temperature_forward_event(
