@@ -112,7 +112,7 @@ jobs:
           retention-days: 90
 
       - name: Run V7.2 recent-500 expanding prequential research
-        run: python scripts/v72_recent500_research.py > artifacts/v72/v72_console_report.json
+        run: python scripts/v72_recent500_research.py
       - name: Upload V7.2 recent-500 research
         uses: actions/upload-artifact@v4
         with:
