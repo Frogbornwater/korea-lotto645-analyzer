@@ -1,0 +1,45 @@
+name: V8.3 first-order feature contribution audit
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "v83_feature_audit.py"
+      - "tests/test_v83_feature_audit.py"
+      - "scripts/v83_first_order_feature_audit.py"
+      - ".github/workflows/v83-feature-audit.yml"
+      - "v50_predictive_engine.py"
+  push:
+    branches: [main, research/v83-first-order-feature-audit]
+    paths:
+      - "v83_feature_audit.py"
+      - "tests/test_v83_feature_audit.py"
+      - "scripts/v83_first_order_feature_audit.py"
+      - ".github/workflows/v83-feature-audit.yml"
+      - "v50_predictive_engine.py"
+
+jobs:
+  first-order-feature-audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+      - name: Install research dependencies
+        run: python -m pip install -r requirements.txt
+      - name: Compile V8.3 research modules
+        run: python -m py_compile v83_feature_audit.py scripts/v83_first_order_feature_audit.py
+      - name: Test V8.3 feature audit
+        run: python -m unittest discover -s tests -p "test_v83_feature_audit.py" -v
+      - name: Run 500-draw prequential feature audit
+        run: python scripts/v83_first_order_feature_audit.py
+      - name: Upload V8.3 feature audit report and detail
+        uses: actions/upload-artifact@v4
+        with:
+          name: v83-first-order-feature-audit
+          path: artifacts/v83/
+          if-no-files-found: error
+          retention-days: 90
