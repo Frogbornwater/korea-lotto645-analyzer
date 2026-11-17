@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""V6.1 nested chronological feature ablation on development draws 1-1049.
+"""V6.1 rolling chronological feature ablation on development draws 1-1049.
 
 All folds are strictly chronological and disjoint in their target draws.
 This is historical development evidence, not an untouched prospective test.
@@ -185,7 +185,7 @@ def main() -> None:
     summary.to_csv(output_dir / "v61_nested_ablation_summary.csv", index=False, encoding="utf-8-sig")
     fingerprint = hashlib.sha256(history.to_csv(index=False).encode("utf-8")).hexdigest()
     report = {
-        "experiment": "V6.1 nested chronological feature ablation",
+        "experiment": "V6.1 rolling chronological feature ablation",
         "status": "historical_development_screen_not_independent_or_prospective_evidence",
         "data_range": [DATA_FIRST_DRAW, DATA_LAST_DRAW],
         "target_folds": chronological_folds(),
