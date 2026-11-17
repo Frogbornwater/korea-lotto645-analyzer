@@ -1,0 +1,68 @@
+{
+  "protocol_id": "v77-v51-forward-50-draws",
+  "version": "7.7",
+  "title": "V5.1固定50期真实前瞻验证",
+  "target_draw_window": {
+    "start": 1251,
+    "end": 1300,
+    "count": 50
+  },
+  "reference_lock": {
+    "commitment_id": "lotto645-v51-forward-lock-draw-1251",
+    "rule": "Use the unique, hash-verified 1251 lock as the frozen model configuration reference."
+  },
+  "model_configuration_fields_that_must_remain_fixed": [
+    "model",
+    "engine_version",
+    "training_window",
+    "ridge_alpha",
+    "pair_strength",
+    "requested_overlap",
+    "ticket_count",
+    "seed"
+  ],
+  "random_control": {
+    "strategy": "uniform random six-number tickets",
+    "ticket_count_rule": "Must equal the model ticket count and be a positive integer for each target draw.",
+    "seed_rule": {
+      "draw_1251_compatibility": "Preserve the committed 1251 lock random_seed exactly as seed XOR 0x5A17.",
+      "subsequent_draws": "For target_draw > 1251, random_seed = seed XOR 0x5A17 XOR target_draw.",
+      "purpose": "Keep the model configuration seed frozen while generating a distinct reproducible uniform-random control portfolio for each target draw."
+    }
+  },
+  "primary_endpoint": {
+    "name": "mean_hits_difference_per_ticket",
+    "definition": "Per target draw: V5.1 mean hits per ticket minus the same-draw uniform-random control mean hits per ticket.",
+    "direction": "positive favors V5.1",
+    "sampling_unit": "target draw",
+    "inference": {
+      "method": "percentile bootstrap over target-draw paired differences",
+      "confidence_level": 0.95,
+      "repetitions": 20000,
+      "seed": 77125130,
+      "timing": "Run only after all 50 unique target draws have been scored."
+    }
+  },
+  "secondary_endpoints_descriptive_only": [
+    "single_ticket_3plus_rate",
+    "batch_at_least_one_3plus_rate",
+    "Brier score versus the uniform marginal probability 6/45",
+    "Log Loss versus the uniform marginal probability 6/45"
+  ],
+  "protocol_guards": [
+    "Exactly one forward-lock event per target draw.",
+    "If a target draw has multiple lock events, exclude all records for that target; never select the best-performing one.",
+    "Require one unique 1251 reference lock and identical frozen model configuration fields across all 50 target draws.",
+    "Require equal, positive integer ticket counts for model and random control on every draw.",
+    "Do not stop early, tune parameters, or change the model during the fixed window.",
+    "Show only descriptive summaries before all 50 draws are complete; do not issue interim significance claims."
+  ],
+  "data_policy": "Only user-manually-imported historical CSV/Excel data. No official lottery website, API, scraping, third-party results feed, or automatic draw synchronization.",
+  "interpretation_boundary": "This protocol evaluates a pre-specified model against a same-draw random control. It does not imply improved future winning probability unless the locked prospective results support that conclusion.",
+  "timestamp_anchor_policy": {
+    "requirement": "Each target lock needs an independently verifiable hash-only repository commitment created before that target draw.",
+    "draw_1251": "V7.6 contains a hash-only repository commitment; its chronology must still be checked against the actual draw date in the manually imported history.",
+    "draws_1252_to_1300": "The event created_at_utc value is self-reported unless and until a separate pre-draw hash-only repository commitment is recorded.",
+    "interpretation": "A completed statistical window or Bootstrap interval is not, by itself, proof that every prediction was locked before its outcome. Do not claim proven prospective advantage until all included target locks have pre-draw timestamp anchors."
+  }
+}

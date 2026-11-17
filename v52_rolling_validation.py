@@ -87,7 +87,12 @@ def build_v51_forward_lock_event(
 
     if not candidate_records:
         raise ValueError("V5.1候选组合为空。")
+    # Preserve the already committed 1251 random control exactly. For each
+    # subsequent target draw, derive a distinct reproducible control seed so
+    # the same ten random tickets are not reused across the whole horizon.
     random_seed = int(seed) ^ 0x5A17
+    if target_draw > 1251:
+        random_seed ^= target_draw
     random_tickets = generate_tickets(
         np.full(45, 6.0 / 45.0, dtype=float),
         None,
@@ -300,6 +305,8 @@ def evaluate_v51_forward_lock_events(
 
         summary_rows.append({
             "目标期号": target_draw,
+            "V5.1注数": len(per_strategy[V51_STRATEGY]),
+            "随机注数": len(per_strategy[RANDOM_STRATEGY]),
             "V5.1平均命中数": v51["mean_hits"],
             "随机平均命中数": random["mean_hits"],
             "平均命中差值": v51["mean_hits"] - random["mean_hits"],
