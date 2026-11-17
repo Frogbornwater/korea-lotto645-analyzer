@@ -1,0 +1,39 @@
+name: V7.4 recent-1000 expanding research
+
+on:
+  pull_request:
+    branches: ["main"]
+    paths:
+      - "scripts/v74_recent1000_research.py"
+      - "tests/test_v74_recent1000_research.py"
+      - "data/lotto645.csv"
+      - "lotto_core.py"
+      - "v50_predictive_engine.py"
+      - "requirements.txt"
+      - ".github/workflows/v74-recent1000-research.yml"
+
+jobs:
+  research:
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Compile V7.4 research and tests
+        run: python -m py_compile scripts/v74_recent1000_research.py tests/test_v74_recent1000_research.py
+      - name: Run V7.4 unit tests
+        run: python -m unittest discover -s tests -p 'test_v74_recent1000_research.py' -v
+      - name: Run recent-1000 expanding prequential research
+        run: python scripts/v74_recent1000_research.py
+      - name: Upload V7.4 research artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: v74-recent1000-expanding-research
+          path: artifacts/v74/
+          if-no-files-found: error
+          retention-days: 90
