@@ -149,40 +149,52 @@ def run_research(frame: pd.DataFrame) -> dict:
         for idx in range(MIN_HISTORY, len(history))
     }
     candidate_results = []
-    for config in CONFIGS:
-        key = config_key(config)
-        for target_idx in range(first_target_idx, len(history)):
+    # Pair strength affects ticket construction, not fitted marginal probabilities.
+    # Fit each (training_window, ridge_alpha) model once per target, then evaluate
+    # all three pair strengths from the same fitted probabilities/pair matrix.
+    model_configs = sorted({
+        (int(x["training_window"]), float(x["ridge_alpha"]))
+        for x in CONFIGS
+    })
+    pair_strengths = (0.0, 0.5, 1.0)
+    for target_idx in range(first_target_idx, len(history)):
+        target_draw = int(draws[target_idx])
+        actual = set(int(x) for x in matrix[target_idx])
+        target_seed = int(np.random.SeedSequence([MASTER_SEED, target_draw]).generate_state(1)[0])
+        random_tickets = generate_tickets(
+            np.full(45, 6.0 / 45.0), None, TICKETS_PER_DRAW,
+            target_seed ^ 0x5A17, pair_strength=0.0
+        )
+        for training_window, ridge_alpha in model_configs:
             probabilities, pair_scores, diagnostics = _fit_from_feature_cache(
-                matrix, feature_cache, target_idx,
-                config["training_window"], config["ridge_alpha"]
+                matrix, feature_cache, target_idx, training_window, ridge_alpha
             )
             if int(diagnostics["training_draws"]) < 30:
                 raise RuntimeError("候选配置训练样本不足。")
-            target_draw = int(draws[target_idx])
-            actual = set(int(x) for x in matrix[target_idx])
-            target_seed = int(np.random.SeedSequence([MASTER_SEED, target_draw]).generate_state(1)[0])
-            tickets = generate_tickets(
-                probabilities, pair_scores, TICKETS_PER_DRAW, target_seed,
-                pair_strength=config["pair_strength"]
-            )
-            random_tickets = generate_tickets(
-                np.full(45, 6.0 / 45.0), None, TICKETS_PER_DRAW,
-                target_seed ^ 0x5A17, pair_strength=0.0
-            )
-            row = {
-                "目标期号": target_draw,
-                "训练结束期": int(draws[target_idx - 1]),
-                "训练期数": int(diagnostics["training_draws"]),
-                "V5_45号码概率_JSON": json.dumps([float(x) for x in probabilities], separators=(",", ":")),
-                "实际主号码": json.dumps(sorted(actual)),
-                "V5_号码列表": "|".join(str(x) for x in tickets),
-                "随机_号码列表": "|".join(str(x) for x in random_tickets),
-            }
-            candidate_results.append({
-                "target_draw": target_draw,
-                "config_key": key,
-                **_draw_metrics(row),
-            })
+            for pair_strength in pair_strengths:
+                config = {
+                    "training_window": training_window,
+                    "ridge_alpha": ridge_alpha,
+                    "pair_strength": pair_strength,
+                }
+                tickets = generate_tickets(
+                    probabilities, pair_scores, TICKETS_PER_DRAW, target_seed,
+                    pair_strength=pair_strength
+                )
+                row = {
+                    "目标期号": target_draw,
+                    "训练结束期": int(draws[target_idx - 1]),
+                    "训练期数": int(diagnostics["training_draws"]),
+                    "V5_45号码概率_JSON": json.dumps([float(x) for x in probabilities], separators=(",", ":")),
+                    "实际主号码": json.dumps(sorted(actual)),
+                    "V5_号码列表": "|".join(str(x) for x in tickets),
+                    "随机_号码列表": "|".join(str(x) for x in random_tickets),
+                }
+                candidate_results.append({
+                    "target_draw": target_draw,
+                    "config_key": config_key(config),
+                    **_draw_metrics(row),
+                })
 
     candidates = pd.DataFrame(candidate_results)
     expected_targets = list(range(int(draws[-TARGET_DRAWS]), int(draws[-1]) + 1))
