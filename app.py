@@ -1542,9 +1542,16 @@ if show_legacy_tools:
                             "该承诺锚定了档案内容；是否确实早于开奖，仍需对照仓库提交时间与手动导入的开奖日期。"
                         )
                     else:
+                        committed_event_id = "b1ba0fb9-4b1d-4dc3-8da2-43c45003e5eb"
+                        imported_before_filter = len(imported)
+                        imported = [
+                            event for event in imported
+                            if str(event.get("event_id")) != committed_event_id
+                        ]
                         st.warning(
-                            "检测到第1251期锁定事件，但它与仓库哈希承诺不匹配。"
-                            "系统仍会执行历史前缀指纹校验，不会把该档案当作已锚定的原始锁定内容。"
+                            "检测到第1251期锁定事件，但它与仓库中的原始档案哈希承诺不匹配。"
+                            "为防止事后替换预测，已拒绝将这条1251期事件加入复评分；"
+                            "档案中的其他事件仍可导入。请使用最初保存的原始JSON。"
                         )
                 existing_ids = {event.get("event_id") for event in st.session_state.get("v40_events", [])}
                 merged = list(st.session_state.get("v40_events", []))
