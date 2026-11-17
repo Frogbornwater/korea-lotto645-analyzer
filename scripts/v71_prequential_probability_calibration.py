@@ -8,7 +8,12 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from scripts.v64_exact_null_holm_audit import bootstrap_ci, sign_flip_pvalue, holm_adjust
+try:
+    # Direct script execution places the scripts/ directory on sys.path.
+    from v64_exact_null_holm_audit import bootstrap_ci, sign_flip_pvalue, holm_adjust
+except ModuleNotFoundError:
+    # Unit-test imports from the repository root use the package-style path.
+    from scripts.v64_exact_null_holm_audit import bootstrap_ci, sign_flip_pvalue, holm_adjust
 
 ROOT = Path(__file__).resolve().parents[1]
 FOLDS = ((850, 899), (900, 949), (950, 999), (1000, 1049))
