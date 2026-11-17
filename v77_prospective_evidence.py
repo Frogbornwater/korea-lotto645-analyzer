@@ -42,6 +42,17 @@ _REQUIRED_COLUMNS = (
     "V5.1_LogLoss",
 )
 
+_FIXED_CONFIG_FIELDS = (
+    "model",
+    "engine_version",
+    "training_window",
+    "ridge_alpha",
+    "pair_strength",
+    "requested_overlap",
+    "ticket_count",
+    "seed",
+)
+
 _OUTPUT_COLUMNS = (
     "目标期号",
     "V5.1注数",
@@ -215,6 +226,7 @@ def build_v77_evidence_report(
     # This prevents a failed or pending duplicate lock from disappearing from
     # the protocol audit and then allowing the best-scoring sibling to survive.
     lock_target_counts: dict[int, int] = {}
+    lock_events_by_target: dict[int, list[dict[str, Any]]] = {}
     lock_outside_window: set[int] = set()
     for event in lock_events or []:
         if not isinstance(event, dict) or event.get("event_type") != "v51_forward_lock":
@@ -226,6 +238,7 @@ def build_v77_evidence_report(
             continue
         if start_draw <= lock_target <= end_draw:
             lock_target_counts[lock_target] = lock_target_counts.get(lock_target, 0) + 1
+            lock_events_by_target.setdefault(lock_target, []).append(event)
         else:
             lock_outside_window.add(lock_target)
 
@@ -234,16 +247,79 @@ def build_v77_evidence_report(
     }
     duplicate_draws = sorted(set(duplicate_draws) | duplicate_lock_draws)
     out_of_window_draws = sorted(set(out_of_window_draws) | lock_outside_window)
+    missing_lock_draws = sorted(set(expected_draws) - set(lock_target_counts))
+
+    # The committed 1251 lock is the configuration reference for the complete
+    # prospective window. All later locks must preserve its model settings.
+    reference_events = lock_events_by_target.get(start_draw, [])
+    reference_config = (
+        reference_events[0].get("payload", {}).get("configuration", {})
+        if len(reference_events) == 1
+        else {}
+    )
+    reference_config_available = (
+        isinstance(reference_config, dict)
+        and all(field in reference_config for field in _FIXED_CONFIG_FIELDS)
+    )
+    configuration_mismatch_draws: list[int] = []
+    if lock_events is not None:
+        for target, target_events in lock_events_by_target.items():
+            if len(target_events) != 1:
+                continue
+            event = target_events[0]
+            payload = event.get("payload", {})
+            config = payload.get("configuration", {})
+            metadata = payload.get("metadata", {})
+            if not reference_config_available:
+                configuration_mismatch_draws.append(target)
+                continue
+            config_matches = all(
+                config.get(field) == reference_config.get(field)
+                for field in _FIXED_CONFIG_FIELDS
+            )
+            metadata_echo_fields = (
+                "engine_version",
+                "training_window",
+                "ridge_alpha",
+                "pair_strength",
+                "requested_overlap",
+                "seed",
+                "ticket_count",
+            )
+            metadata_matches = all(
+                metadata.get(field) == config.get(field)
+                for field in metadata_echo_fields
+            )
+            try:
+                expected_random_seed = int(config["seed"]) ^ 0x5A17
+                random_seed_matches = int(metadata.get("random_seed", -1)) == expected_random_seed
+            except (KeyError, TypeError, ValueError):
+                random_seed_matches = False
+            if not (config_matches and metadata_matches and random_seed_matches):
+                configuration_mismatch_draws.append(target)
+    configuration_mismatch_draws = sorted(set(configuration_mismatch_draws))
 
     if duplicate_draws:
         rows = rows.loc[~rows["目标期号"].isin(duplicate_draws)].reset_index(drop=True)
 
     valid_draws = sorted(int(value) for value in rows["目标期号"].tolist())
     missing_draws = sorted(set(expected_draws) - set(valid_draws))
-    complete_horizon = not missing_draws and not duplicate_draws
+    missing_reference_lock = lock_events is not None and not reference_config_available
+    complete_horizon = (
+        not missing_draws
+        and not duplicate_draws
+        and not missing_lock_draws
+        and lock_events is not None
+        and not missing_reference_lock
+        and not configuration_mismatch_draws
+    )
     status = (
         "protocol_violation_duplicate_target"
         if duplicate_draws
+        else "protocol_violation_missing_reference_lock"
+        if missing_reference_lock
+        else "protocol_violation_configuration_mismatch"
+        if configuration_mismatch_draws
         else "complete_fixed_horizon"
         if complete_horizon
         else "collecting_fixed_horizon"
@@ -309,7 +385,14 @@ def build_v77_evidence_report(
         "planned_draws": planned_draws,
         "scored_unique_draws": n_scored,
         "missing_draws": missing_draws,
+        "missing_lock_draws": missing_lock_draws,
         "duplicate_draws_excluded": duplicate_draws,
+        "configuration_reference_available": bool(reference_config_available),
+        "configuration_mismatch_draws": configuration_mismatch_draws,
+        "reference_configuration": {
+            field: reference_config.get(field)
+            for field in _FIXED_CONFIG_FIELDS
+        } if reference_config_available else None,
         "out_of_window_draws_ignored": out_of_window_draws,
         "primary_endpoint": {
             "name": "每注平均命中数差值（V5.1－同期开奖随机对照）",
