@@ -541,10 +541,11 @@ def _github_json_request(
 
     headers = {
         "Accept": "application/vnd.github+json",
-        "Authorization": f"Bearer {token}",
         "X-GitHub-Api-Version": "2022-11-28",
         "User-Agent": "lotto645-v55-hash-only-lock",
     }
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
     data = None if payload is None else json.dumps(payload, ensure_ascii=False).encode("utf-8")
     request = urllib.request.Request(url, data=data, headers=headers, method=method)
     try:
@@ -659,4 +660,98 @@ def persist_hash_only_commitment(
         "commit_time_utc": commit_date,
         "archive_sha256": archive_sha,
         "url": f"https://github.com/{repository}/blob/{branch}/{path}",
+    }
+
+
+
+def verify_hash_only_manifest(
+    event: dict[str, Any],
+    manifest: dict[str, Any],
+) -> dict[str, Any]:
+    """Verify an imported one-event archive against its public hash-only manifest."""
+    try:
+        validated = validate_event(event)
+        expected_manifest, archive_sha = build_hash_only_commitment(validated)
+        checks = {
+            "event_id": manifest.get("event_id") == expected_manifest["event_id"],
+            "event_type": manifest.get("event_type") == EVENT_TYPE,
+            "target_draw": manifest.get("target_draw") == expected_manifest["target_draw"],
+            "history": manifest.get("history") == expected_manifest["history"],
+            "temperature_lock": manifest.get("temperature_lock") == expected_manifest["temperature_lock"],
+            "archive_sha256": manifest.get("archive_commitment", {}).get("sha256") == archive_sha,
+            "no_ticket_numbers_published": manifest.get("archive_commitment", {}).get("ticket_numbers_embedded") is False,
+            "no_probability_vectors_published": manifest.get("archive_commitment", {}).get("probability_vectors_embedded") is False,
+        }
+        return {
+            "verified": all(checks.values()),
+            "checks": checks,
+            "archive_sha256": archive_sha,
+            "target_draw": expected_manifest["target_draw"],
+        }
+    except (ValueError, KeyError, TypeError) as exc:
+        return {"verified": False, "status": f"承诺校验失败：{exc}", "checks": {}}
+
+
+def verify_persisted_hash_only_commitment(
+    event: dict[str, Any],
+    token: str = "",
+    *,
+    repository: str = "Frogbornwater/korea-lotto645-analyzer",
+    branch: str = "forward-lock-commitments",
+) -> dict[str, Any]:
+    """Read the public GitHub manifest and its commit timestamp, then verify bytes."""
+    import base64
+    import urllib.parse
+
+    validated = validate_event(event)
+    if validated.get("event_type") != EVENT_TYPE:
+        return {"verified": False, "status": "不是V5.5温度前瞻事件"}
+    target_draw = int(validated["payload"]["metadata"]["target_draw"])
+    owner, name = repository.split("/", 1)
+    api_root = f"https://api.github.com/repos/{owner}/{name}"
+    path = f"forward-lock-commitments/draw_{target_draw}.json"
+    path_encoded = urllib.parse.quote(path, safe="/")
+    branch_encoded = urllib.parse.quote(branch, safe="")
+    status, data = _github_json_request(
+        "GET", f"{api_root}/contents/{path_encoded}?ref={branch_encoded}", token
+    )
+    if status == 404:
+        return {"verified": False, "status": "未找到公开GitHub哈希承诺", "target_draw": target_draw}
+    if status != 200:
+        return {"verified": False, "status": f"读取公开哈希承诺失败：HTTP {status}", "target_draw": target_draw}
+    try:
+        encoded = str(data.get("content", "")).replace("\\n", "")
+        public_manifest = json.loads(base64.b64decode(encoded).decode("utf-8"))
+    except Exception as exc:
+        return {"verified": False, "status": f"公开哈希承诺无法解析：{exc}", "target_draw": target_draw}
+
+    check = verify_hash_only_manifest(validated, public_manifest)
+    if not check.get("verified"):
+        return {
+            **check,
+            "status": "锁定档案与公开GitHub哈希承诺不匹配",
+            "target_draw": target_draw,
+            "manifest_url": f"https://github.com/{repository}/blob/{branch}/{path}",
+        }
+
+    commits_status, commits_data = _github_json_request(
+        "GET",
+        f"{api_root}/commits?path={path_encoded}&sha={branch_encoded}&per_page=1",
+        token,
+    )
+    commit_sha = None
+    commit_time = None
+    if commits_status == 200 and isinstance(commits_data, list) and commits_data:
+        commit_sha = commits_data[0].get("sha")
+        commit_time = (
+            commits_data[0].get("commit", {}).get("committer", {}).get("date")
+            or commits_data[0].get("commit", {}).get("author", {}).get("date")
+        )
+    return {
+        **check,
+        "status": "公开哈希承诺匹配",
+        "target_draw": target_draw,
+        "commit_sha": commit_sha,
+        "commit_time_utc": commit_time,
+        "manifest_url": f"https://github.com/{repository}/blob/{branch}/{path}",
     }
