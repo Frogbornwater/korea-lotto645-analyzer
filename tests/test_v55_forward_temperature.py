@@ -17,6 +17,7 @@ from v55_forward_temperature import (
     TEMPERATURE_STRATEGY,
     RANDOM_STRATEGY,
     build_hash_only_commitment,
+    aggregate_v55_temperature_forward_evidence,
     build_v55_temperature_forward_event,
     check_frozen_base_history,
     evaluate_v55_temperature_forward_events,
@@ -39,6 +40,66 @@ class V55TemperatureForwardTests(unittest.TestCase):
         }])
         cls.history_1251 = validate_frame(pd.concat([base, synthetic_1251], ignore_index=True))
         cls.commitment = load_commitment()
+
+    def test_multi_draw_gate_requires_100_forward_draws(self):
+        rows = []
+        for draw in range(1252, 1332):
+            rows.append({
+                "目标期号": draw,
+                "V5原始概率平均命中": 0.80,
+                "V5.5校准平均命中": 0.85,
+                "随机平均命中": 0.80,
+                "V5原始概率单注3+率": 0.02,
+                "V5.5校准单注3+率": 0.04,
+                "随机单注3+率": 0.02,
+                "V5原始概率整批3+": 0.20,
+                "V5.5校准整批3+": 0.30,
+                "随机整批3+": 0.20,
+                "V5原始Brier": 0.1160,
+                "V5.5校准Brier": 0.1150,
+                "随机Brier": 0.1158,
+                "V5原始LogLoss": 0.3930,
+                "V5.5校准LogLoss": 0.3920,
+                "随机LogLoss": 0.3928,
+            })
+        frame = pd.DataFrame(rows)
+        report, gate = aggregate_v55_temperature_forward_evidence(
+            frame, minimum_draws=100, repetitions=1000, block_length=3, seed=7755
+        )
+        self.assertEqual(len(report), 10)
+        self.assertFalse(gate["second_independent_replication_allowed"])
+        self.assertFalse(gate["production_model_change_allowed"])
+        self.assertIn("至少需要100期", gate["status"])
+
+    def test_multi_draw_gate_only_opens_second_research_stage(self):
+        rows = []
+        for draw in range(1252, 1372):
+            rows.append({
+                "目标期号": draw,
+                "V5原始概率平均命中": 0.80,
+                "V5.5校准平均命中": 0.85,
+                "随机平均命中": 0.80,
+                "V5原始概率单注3+率": 0.02,
+                "V5.5校准单注3+率": 0.04,
+                "随机单注3+率": 0.02,
+                "V5原始概率整批3+": 0.20,
+                "V5.5校准整批3+": 0.30,
+                "随机整批3+": 0.20,
+                "V5原始Brier": 0.1160,
+                "V5.5校准Brier": 0.1150,
+                "随机Brier": 0.1158,
+                "V5原始LogLoss": 0.3930,
+                "V5.5校准LogLoss": 0.3920,
+                "随机LogLoss": 0.3928,
+            })
+        report, gate = aggregate_v55_temperature_forward_evidence(
+            pd.DataFrame(rows), minimum_draws=100, repetitions=1000, block_length=3, seed=7756
+        )
+        self.assertEqual(len(report), 10)
+        self.assertTrue(gate["calibration_improvement_supported_vs_raw_v5"])
+        self.assertTrue(gate["second_independent_replication_allowed"])
+        self.assertFalse(gate["production_model_change_allowed"])
+        self.assertFalse(gate["prediction_superiority_proven"])
 
     def test_frozen_commitment_is_exact_and_research_only(self):
         result = verify_commitment(self.commitment)
