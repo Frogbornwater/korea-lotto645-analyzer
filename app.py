@@ -65,7 +65,7 @@ from v50_predictive_engine import fit_predict_next as v50_fit_predict_next, gene
 from v51_smart_picker import generate_constrained_tickets as v51_generate_constrained_tickets
 from v52_rolling_validation import build_v51_forward_lock_event, event_tickets_frame, evaluate_v51_forward_lock_events
 from forward_lock_commitment import (
-    filter_uncommitted_1251_events,
+    merge_events_with_1251_commitment,
     verify_1251_archive_bytes,
 )
 from v53_randomized_audit import run_multi_seed_random_audit
@@ -1551,9 +1551,11 @@ if show_legacy_tools:
                             "为防止事后替换预测，已拒绝将这条1251期事件加入复评分；"
                             "档案中的其他事件仍可导入。请使用最初保存的原始JSON。"
                         )
-                existing_ids = {event.get("event_id") for event in st.session_state.get("v40_events", [])}
-                merged = list(st.session_state.get("v40_events", []))
-                merged.extend(event for event in imported if event.get("event_id") not in existing_ids)
+                merged = merge_events_with_1251_commitment(
+                    st.session_state.get("v40_events", []),
+                    imported,
+                    _1251_commitment,
+                )
                 st.session_state["v40_events"] = merged
                 st.success(f"已恢复{len(imported)}条研究事件。")
             except Exception as exc:
