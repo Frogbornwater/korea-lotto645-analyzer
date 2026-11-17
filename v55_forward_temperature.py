@@ -110,9 +110,10 @@ def check_frozen_base_history(
                 "history_last_draw": int(draws[-1]),
                 "prefix_rows": int(len(prefix)),
             }
-        # Original V5.5 archive used blank date cells. Dates are not model inputs;
-        # normalize them away before comparing the exact committed number history.
-        prefix.loc[:, "date"] = ""
+        # The original V5.5 build read blank date cells with pandas, which
+        # canonicalized them to the literal string "nan". Recreate that exact
+        # canonical representation while ignoring any real dates in uploads.
+        prefix.loc[:, "date"] = np.nan
         observed = data_fingerprint(prefix)
         expected = commitment["temperature_lock"]["history_sha256"]
         if observed != expected:
@@ -185,23 +186,24 @@ def build_v55_temperature_forward_event(
         raise ValueError("温度校准概率总和不等于6。")
     pair_scores = np.asarray(prediction["pair_scores"], dtype=float)
     target_draw = history_last + 1
-    raw_seed = _derived_seed(master_seed, target_draw, 7701)
-    calibrated_seed = _derived_seed(master_seed, target_draw, 7702)
+    # Use common random numbers for raw and calibrated sampling so differences
+    # are driven by the probability transform, not independent RNG streams.
+    paired_model_seed = _derived_seed(master_seed, target_draw, 7701)
     random_seed = _derived_seed(master_seed, target_draw, 7703)
 
     raw_tickets = generate_tickets(
         raw_probabilities, pair_scores, int(ticket_count), raw_seed, pair_strength=0.5
     )
     calibrated_tickets = generate_tickets(
-        calibrated_probabilities, pair_scores, int(ticket_count), calibrated_seed, pair_strength=0.5
+        calibrated_probabilities, pair_scores, int(ticket_count), paired_model_seed, pair_strength=0.5
     )
     random_tickets = generate_tickets(
         np.full(45, 6.0 / 45.0, dtype=float), None, int(ticket_count), random_seed, pair_strength=0.0
     )
 
     strategy_tickets = (
-        (RAW_STRATEGY, raw_tickets, raw_seed),
-        (TEMPERATURE_STRATEGY, calibrated_tickets, calibrated_seed),
+        (RAW_STRATEGY, raw_tickets, paired_model_seed),
+        (TEMPERATURE_STRATEGY, calibrated_tickets, paired_model_seed),
         (RANDOM_STRATEGY, random_tickets, random_seed),
     )
     ticket_records: list[dict[str, Any]] = []
@@ -248,8 +250,8 @@ def build_v55_temperature_forward_event(
             "pair_strength": 0.5,
             "ticket_count_per_strategy": int(ticket_count),
             "master_seed": int(master_seed),
-            "raw_seed": raw_seed,
-            "temperature_seed": calibrated_seed,
+            "raw_seed": paired_model_seed,
+            "temperature_seed": paired_model_seed,
             "random_seed": random_seed,
         },
         "configuration": {
@@ -263,7 +265,8 @@ def build_v55_temperature_forward_event(
             "pair_strength": 0.5,
             "ticket_count_per_strategy": int(ticket_count),
             "seed_derivation": "SeedSequence([master_seed, target_draw, stream_id])",
-            "stream_ids": {"raw_v5": 7701, "temperature_2_875": 7702, "uniform_random": 7703},
+            "stream_ids": {"raw_v5_and_temperature_2_875_paired": 7701, "uniform_random": 7703},
+            "paired_model_seed": paired_model_seed,
         },
         "number_probabilities": probability_records,
         "tickets": ticket_records,
