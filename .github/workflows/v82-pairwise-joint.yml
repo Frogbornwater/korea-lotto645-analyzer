@@ -1,0 +1,47 @@
+name: V8.2 pairwise joint-probability research
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "v82_pairwise_joint.py"
+      - "tests/test_v82_pairwise_joint.py"
+      - "scripts/v82_pairwise_joint_research.py"
+      - ".github/workflows/v82-pairwise-joint.yml"
+      - "v80_probability_sampling.py"
+      - "v50_predictive_engine.py"
+  push:
+    branches: [main, research/v82-pairwise-joint-forecast]
+    paths:
+      - "v82_pairwise_joint.py"
+      - "tests/test_v82_pairwise_joint.py"
+      - "scripts/v82_pairwise_joint_research.py"
+      - ".github/workflows/v82-pairwise-joint.yml"
+      - "v80_probability_sampling.py"
+      - "v50_predictive_engine.py"
+
+jobs:
+  pairwise-joint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+      - name: Install research dependencies
+        run: python -m pip install -r requirements.txt
+      - name: Compile V8.2 research modules
+        run: python -m py_compile v82_pairwise_joint.py scripts/v82_pairwise_joint_research.py
+      - name: Test V8.2 pairwise probability constraints
+        run: python -m unittest discover -s tests -p "test_v82_pairwise_joint.py" -v
+      - name: Run 500-draw prequential pairwise research
+        run: python scripts/v82_pairwise_joint_research.py
+      - name: Upload V8.2 pairwise research report
+        uses: actions/upload-artifact@v4
+        with:
+          name: v82-pairwise-joint-research
+          path: artifacts/v82/
+          if-no-files-found: error
+          retention-days: 90
