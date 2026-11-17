@@ -1,0 +1,32 @@
+name: V7.7 fixed-horizon forward evidence tests
+
+on:
+  pull_request:
+    branches: ["main"]
+    paths:
+      - "v77_prospective_evidence.py"
+      - "tests/test_v77_prospective_evidence.py"
+      - "app.py"
+  push:
+    branches: ["main"]
+    paths:
+      - "v77_prospective_evidence.py"
+      - "tests/test_v77_prospective_evidence.py"
+      - "app.py"
+
+jobs:
+  prospective-evidence:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Compile the V7.7 prospective evidence module and app
+        run: python -m py_compile v77_prospective_evidence.py app.py tests/test_v77_prospective_evidence.py
+      - name: Run V7.7 fixed-horizon tests
+        run: python -m unittest discover -s tests -p 'test_v77_prospective_evidence.py' -v
