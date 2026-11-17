@@ -18,6 +18,8 @@ def make_summary(start=V77_START_DRAW, count=50, hit_delta=0.05):
         draw_no = start + offset
         rows.append({
             "目标期号": draw_no,
+            "V5.1注数": 10,
+            "随机注数": 10,
             "V5.1平均命中数": 0.80 + hit_delta,
             "随机平均命中数": 0.80,
             "平均命中差值": hit_delta,
@@ -104,6 +106,12 @@ class V77ProspectiveEvidenceTests(unittest.TestCase):
     def test_invalid_metric_ranges_are_rejected(self):
         source = make_summary(count=2)
         source.loc[0, "V5.1单注3+率"] = 1.5
+        with self.assertRaises(ValueError):
+            build_v77_evidence_report(source)
+
+    def test_unequal_ticket_counts_are_rejected(self):
+        source = make_summary(count=2)
+        source.loc[0, "随机注数"] = 9
         with self.assertRaises(ValueError):
             build_v77_evidence_report(source)
 
