@@ -85,6 +85,22 @@ class V77ProspectiveEvidenceTests(unittest.TestCase):
         self.assertEqual(report["out_of_window_draws_ignored"], [V77_END_DRAW + 1])
         self.assertEqual(len(per_draw), 50)
 
+    def test_pending_duplicate_lock_also_invalidates_target(self):
+        source = make_summary(count=50)
+        duplicate_locks = [
+            {"event_type": "v51_forward_lock", "payload": {"metadata": {"target_draw": V77_START_DRAW}}},
+            {"event_type": "v51_forward_lock", "payload": {"metadata": {"target_draw": V77_START_DRAW}}},
+        ]
+        report, per_draw, _ = build_v77_evidence_report(
+            source,
+            lock_events=duplicate_locks,
+            bootstrap_repetitions=500,
+        )
+        self.assertFalse(report["analysis_ready"])
+        self.assertEqual(report["duplicate_draws_excluded"], [V77_START_DRAW])
+        self.assertEqual(report["scored_unique_draws"], 49)
+        self.assertNotIn(V77_START_DRAW, per_draw["目标期号"].tolist())
+
     def test_invalid_metric_ranges_are_rejected(self):
         source = make_summary(count=2)
         source.loc[0, "V5.1单注3+率"] = 1.5
