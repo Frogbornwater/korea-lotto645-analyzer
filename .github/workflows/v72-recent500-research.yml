@@ -1,8 +1,6 @@
 name: V7.2 recent-500 expanding research
 
 on:
-  push:
-    branches: ["research/v72-recent500-expanding-study"]
   pull_request:
     branches: ["main"]
 
