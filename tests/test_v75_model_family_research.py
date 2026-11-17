@@ -55,7 +55,7 @@ class V75ModelFamilyResearchTests(unittest.TestCase):
         for key, top10, brier, logloss, hits in (
             (UNIFORM_KEY, 1.33, .11555, .39267, .80),
             (V5_BASELINE_KEY, 1.30, .11570, .39310, .79),
-            (V4_BASELINE_KEY, 1.36, .11560, .39270, .81),
+            (V4_BASELINE_KEY, 1.36, .11540, .39250, .81),
         ):
             for _ in range(25):
                 rows.append({
