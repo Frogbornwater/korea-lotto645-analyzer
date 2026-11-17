@@ -1,0 +1,38 @@
+name: V8.1 batch-quota portfolio sampling
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "v81_batch_sampler.py"
+      - "tests/test_v81_batch_sampler.py"
+      - "pages/4_V81批次配额组合研究.py"
+      - ".github/workflows/v81-batch-portfolio.yml"
+      - "v80_probability_sampling.py"
+  push:
+    branches: [main, research/v81-batch-quota-portfolio]
+    paths:
+      - "v81_batch_sampler.py"
+      - "tests/test_v81_batch_sampler.py"
+      - "pages/4_V81批次配额组合研究.py"
+      - ".github/workflows/v81-batch-portfolio.yml"
+      - "v80_probability_sampling.py"
+
+jobs:
+  batch-quota-portfolio:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install test dependencies
+        run: python -m pip install --upgrade numpy pandas
+      - name: Compile V8.1 sampler and research page
+        run: python -m py_compile v81_batch_sampler.py pages/4_V81批次配额组合研究.py
+      - name: Test V8.1 batch-quota portfolio
+        run: python -m unittest discover -s tests -p "test_v81_batch_sampler.py" -v
+      - name: Regression test V8.0 fixed-size sampler
+        run: python -m unittest discover -s tests -p "test_v80_probability_sampling.py" -v
+      - name: Regression test legacy V5.1 sampler
+        run: python -m unittest discover -s tests -p "test_v51_smart_picker.py" -v
