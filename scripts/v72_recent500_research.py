@@ -13,6 +13,7 @@ import ast
 import hashlib
 import itertools
 import json
+from math import comb
 import sys
 from pathlib import Path
 
@@ -47,6 +48,36 @@ PRIMARY_METRICS = ("top10_hits", "Brier", "LogLoss", "mean_hits", "ticket_3plus"
 
 def _decode_numbers(value: str) -> list[int]:
     return [int(x) for x in json.loads(value)]
+
+
+def uniform_random_expectations(tickets_per_draw: int = TICKETS_PER_DRAW) -> dict[str, float]:
+    """Exact 6/45 uniform baselines for ranked numbers and unique random tickets."""
+    total_tickets = comb(45, 6)
+
+    def ticket_probability_at_least(threshold: int) -> float:
+        favorable = sum(
+            comb(6, hits) * comb(39, 6 - hits)
+            for hits in range(threshold, 7)
+        )
+        return favorable / total_tickets
+
+    def batch_probability_at_least(threshold: int) -> float:
+        favorable = round(ticket_probability_at_least(threshold) * total_tickets)
+        return 1.0 - comb(total_tickets - favorable, tickets_per_draw) / comb(
+            total_tickets, tickets_per_draw
+        )
+
+    return {
+        "top10_hits": 10.0 * 6.0 / 45.0,
+        "mean_hits": 6.0 * 6.0 / 45.0,
+        "ticket_3plus": ticket_probability_at_least(3),
+        "ticket_4plus": ticket_probability_at_least(4),
+        "batch_3plus": batch_probability_at_least(3),
+        "batch_4plus": batch_probability_at_least(4),
+        "Brier": (6.0 / 45.0) * (1.0 - 6.0 / 45.0),
+        "LogLoss": -(6.0 / 45.0) * np.log(6.0 / 45.0)
+                   -(39.0 / 45.0) * np.log(39.0 / 45.0),
+    }
 
 
 def _draw_metrics(row: dict) -> dict[str, float]:
@@ -85,6 +116,12 @@ def _draw_metrics(row: dict) -> dict[str, float]:
         "random_batch_4plus": float(np.any(random_hits >= 4)),
         "random_Brier": float(6/45 * (1-6/45)),
         "random_LogLoss": float(-(6/45)*np.log(6/45) -(39/45)*np.log(39/45)),
+        # Exact analytical expectations prevent a single seeded Monte Carlo
+        # control from being mistaken for the theoretical uniform baseline.
+        "uniform_top10_expected": uniform_random_expectations()["top10_hits"],
+        "uniform_mean_hits_expected": uniform_random_expectations()["mean_hits"],
+        "uniform_ticket_3plus_expected": uniform_random_expectations()["ticket_3plus"],
+        "uniform_batch_3plus_expected": uniform_random_expectations()["batch_3plus"],
     }
 
 
@@ -243,12 +280,12 @@ def run_research(frame: pd.DataFrame) -> dict:
 
     summaries = []
     compare_specs = [
-        ("top10_hits", "top10_hits", "higher"),
+        ("top10_hits", "uniform_top10_expected", "higher"),
         ("Brier", "random_Brier", "lower"),
         ("LogLoss", "random_LogLoss", "lower"),
-        ("mean_hits", "random_mean_hits", "higher"),
-        ("ticket_3plus", "random_ticket_3plus", "higher"),
-        ("batch_3plus", "random_batch_3plus", "higher"),
+        ("mean_hits", "uniform_mean_hits_expected", "higher"),
+        ("ticket_3plus", "uniform_ticket_3plus_expected", "higher"),
+        ("batch_3plus", "uniform_batch_3plus_expected", "higher"),
     ]
     for idx, (metric, control, direction) in enumerate(compare_specs):
         diff = selected[metric].to_numpy(float) - selected[control].to_numpy(float)
@@ -324,6 +361,13 @@ def run_research(frame: pd.DataFrame) -> dict:
         "selection": "Each 100-draw block selects from completed earlier blocks only using mean rank across Top10, Brier, LogLoss, and mean ticket hits; first block uses the preregistered V5 baseline.",
         "primary_metrics": list(PRIMARY_METRICS),
         "uncertainty": f"{BOOTSTRAP_REPS} moving-block bootstrap replicates, block length {BLOCK_BOOTSTRAP_LENGTH}",
+        "uniform_random_baseline_exact": uniform_random_expectations(),
+        "seeded_random_control_diagnostic_only": {
+            "mean_hits": float(selected["random_mean_hits"].mean()),
+            "ticket_3plus": float(selected["random_ticket_3plus"].mean()),
+            "batch_3plus": float(selected["random_batch_3plus"].mean()),
+            "note": "Single deterministic Monte Carlo seed; retained as a diagnostic only, not used as the primary inferential comparator.",
+        },
         "block_reports": block_reports,
         "selected_prequential_vs_random": summaries[:6],
         "selected_prequential_vs_fixed_baseline": summaries[6:],
@@ -333,6 +377,7 @@ def run_research(frame: pd.DataFrame) -> dict:
             "最近500期是已开奖历史，且部分目标期已参与过此前研究；本报告属于历史研究筛查，不是独立盲测或前瞻证据。",
             "每个目标期的预测均只使用此前开奖；每个100期块的参数选择只使用此前已完成块。",
             "24组候选参数仍存在研究者自由度；区块式前瞻选型可减少但不能完全消除重复研究偏差。",
+            "均匀随机主基准使用6/45理论期望与超几何精确概率；单一种子随机票仅作诊断，不作主要推断。",
             "Top-k号码排序与六号码组合头奖概率不同；历史差异不能证明未来优势。",
             "没有自动修改生产选号器、1251期锁定档案或任何原始开奖数据。",
             "所有数据只来自仓库内用户手动维护的CSV；本研究不访问任何外部开奖网站或API。",
