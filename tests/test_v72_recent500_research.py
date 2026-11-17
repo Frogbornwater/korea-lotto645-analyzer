@@ -33,7 +33,9 @@ class V72Recent500ResearchTests(unittest.TestCase):
 
     def test_uniform_baselines_are_exact_6_of_45_expectations(self):
         baseline = uniform_random_expectations(10)
+        self.assertAlmostEqual(baseline["top6_hits"], 0.8, places=12)
         self.assertAlmostEqual(baseline["top10_hits"], 4.0 / 3.0, places=12)
+        self.assertAlmostEqual(baseline["top15_hits"], 2.0, places=12)
         self.assertAlmostEqual(baseline["mean_hits"], 0.8, places=12)
         self.assertAlmostEqual(baseline["ticket_3plus"], 0.023834078570323606, places=12)
         self.assertAlmostEqual(baseline["batch_3plus"], 0.21433688902346237, places=12)
