@@ -170,6 +170,37 @@ def filter_uncommitted_1251_events(
     ]
 
 
+def merge_events_with_1251_commitment(
+    existing_events: list[dict[str, Any]],
+    imported_events: list[dict[str, Any]],
+    verification: dict[str, Any],
+    manifest: dict[str, Any] | None = None,
+) -> list[dict[str, Any]]:
+    """Merge event imports while replacing/removing any stale committed 1251 copy."""
+    commitment = manifest or load_1251_commitment()
+    existing = list(existing_events)
+    incoming = list(imported_events)
+    if verification.get("applicable"):
+        committed_event_id = str(commitment["event_id"])
+        # Never retain an older in-session copy when a 1251 archive is uploaded.
+        existing = [
+            event for event in existing
+            if str(event.get("event_id")) != committed_event_id
+        ]
+        if not verification.get("matched"):
+            incoming = filter_uncommitted_1251_events(
+                incoming, verification, commitment
+            )
+
+    seen = {str(event.get("event_id")) for event in existing}
+    for event in incoming:
+        event_id = str(event.get("event_id"))
+        if event_id not in seen:
+            existing.append(event)
+            seen.add(event_id)
+    return existing
+
+
 def audit_1251_history_prefix(
     history: pd.DataFrame,
     manifest: dict[str, Any] | None = None,
