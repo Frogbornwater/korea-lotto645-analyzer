@@ -139,6 +139,8 @@ def verify_1251_archive_bytes(
     result["matched"] = all(
         result[key]
         for key in (
+            "raw_file_sha256_matches",
+            "canonical_archive_sha256_matches",
             "canonical_event_sha256_matches",
             "event_id_matches",
             "target_draw_matches",
