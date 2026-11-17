@@ -1,0 +1,46 @@
+name: V7.7 V5.5 frozen-temperature prospective validation
+
+on:
+  pull_request:
+    branches: ["main"]
+    paths:
+      - "v55_forward_temperature.py"
+      - "pages/2_V55_温度校准前瞻研究.py"
+      - "data/forward_lock_commitments/v55_temperature_1250.json"
+      - "tests/test_v55_forward_temperature.py"
+      - "scripts/v55_prequential_temperature_calibration.py"
+      - "v50_predictive_engine.py"
+      - "v40_governance.py"
+      - "v40_store.py"
+      - "lotto_core.py"
+  push:
+    branches: ["main"]
+    paths:
+      - "v55_forward_temperature.py"
+      - "pages/2_V55_温度校准前瞻研究.py"
+      - "data/forward_lock_commitments/v55_temperature_1250.json"
+      - "tests/test_v55_forward_temperature.py"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  prospective-validation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Compile V7.7 helper, Streamlit page, and tests
+        run: |
+          python -m py_compile v55_forward_temperature.py "pages/2_V55_温度校准前瞻研究.py" tests/test_v55_forward_temperature.py
+      - name: Run V7.7 prospective lock and scoring tests
+        run: python -m unittest discover -s tests -p "test_v55_forward_temperature.py" -v
+      - name: Run complete regression suite
+        run: python -m unittest discover -s tests -v
