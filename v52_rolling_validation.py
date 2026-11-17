@@ -300,6 +300,8 @@ def evaluate_v51_forward_lock_events(
 
         summary_rows.append({
             "目标期号": target_draw,
+            "V5.1注数": len(per_strategy[V51_STRATEGY]),
+            "随机注数": len(per_strategy[RANDOM_STRATEGY]),
             "V5.1平均命中数": v51["mean_hits"],
             "随机平均命中数": random["mean_hits"],
             "平均命中差值": v51["mean_hits"] - random["mean_hits"],
