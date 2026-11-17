@@ -410,5 +410,10 @@ def build_v77_evidence_report(
         },
         "no_early_stopping": True,
         "no_best_of_multiple_locks": True,
+        "timestamp_anchor_policy": {
+            "draw_1251": "A hash-only GitHub commitment exists; verify its commit time against the actual draw date in the manually imported history.",
+            "draws_1252_to_1300": "Event created_at_utc values are self-reported until separate pre-draw hash-only repository commitments are recorded.",
+            "warning": "A completed 50-draw statistical interval is not proof of pre-draw locking. Do not claim proven prospective advantage until every included draw has an independently verifiable pre-draw timestamp anchor.",
+        },
     }
     return report, rows if not rows.empty else empty_per_draw, metric_table
