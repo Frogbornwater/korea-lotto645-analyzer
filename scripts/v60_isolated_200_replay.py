@@ -32,6 +32,20 @@ EXPECTED_FIRST_DRAW = 1
 EXPECTED_LAST_DRAW = 1249
 
 
+def select_pinned_history(history: pd.DataFrame) -> pd.DataFrame:
+    """Keep the immutable 1–1249 research prefix; ignore later manually added draws."""
+    draws = history["draw_no"].astype(int)
+    pinned = history.loc[draws <= EXPECTED_LAST_DRAW].copy().reset_index(drop=True)
+    pinned_draws = pinned["draw_no"].astype(int).tolist()
+    expected = list(range(EXPECTED_FIRST_DRAW, EXPECTED_LAST_DRAW + 1))
+    if pinned_draws != expected:
+        raise ValueError(
+            f"本实验要求完整且连续的第{EXPECTED_FIRST_DRAW}—{EXPECTED_LAST_DRAW}期历史前缀；"
+            "缺期、重复或乱序数据均拒绝执行。"
+        )
+    return pinned
+
+
 def isolated_window_bounds(last_draw: int, test_draws: int = HOLDOUT_DRAWS) -> tuple[int, int]:
     """Return inclusive target draw bounds for a chronological tail replay."""
     last_draw = int(last_draw)
@@ -92,16 +106,7 @@ def main() -> None:
     output_dir = ROOT / "artifacts" / "v60"
     output_dir.mkdir(parents=True, exist_ok=True)
     raw = pd.read_csv(data_path)
-    history = validate_frame(raw).reset_index(drop=True)
-    draws = history["draw_no"].astype(int)
-    if int(draws.iloc[0]) != EXPECTED_FIRST_DRAW or int(draws.iloc[-1]) != EXPECTED_LAST_DRAW:
-        raise ValueError(
-            f"本实验锁定的数据范围为第{EXPECTED_FIRST_DRAW}—{EXPECTED_LAST_DRAW}期；"
-            f"当前文件为第{int(draws.iloc[0])}—{int(draws.iloc[-1])}期。"
-            "请先人工核验并更新实验版本，不要静默改变测试窗口。"
-        )
-    if len(history) != EXPECTED_LAST_DRAW - EXPECTED_FIRST_DRAW + 1:
-        raise ValueError("历史数据期数与期号范围不一致，拒绝执行。")
+    history = select_pinned_history(validate_frame(raw).reset_index(drop=True))
 
     result = run_v50_walk_forward(
         history,

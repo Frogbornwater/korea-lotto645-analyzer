@@ -6,6 +6,7 @@ import pandas as pd
 from scripts.v60_isolated_200_replay import (
     build_window_sensitivity,
     isolated_window_bounds,
+    select_pinned_history,
 )
 
 
@@ -20,6 +21,18 @@ class TestV60IsolatedReplay(unittest.TestCase):
             isolated_window_bounds(99, 100)
         with self.assertRaises(ValueError):
             isolated_window_bounds(100, 0)
+
+    def test_pinned_history_ignores_appended_future_draws(self):
+        base = pd.DataFrame({"draw_no": range(1, 1250), "value": range(1, 1250)})
+        extended = pd.concat([base, pd.DataFrame([{"draw_no": 1250, "value": 1250}])], ignore_index=True)
+        selected = select_pinned_history(extended)
+        self.assertEqual(len(selected), 1249)
+        self.assertEqual(int(selected["draw_no"].iloc[-1]), 1249)
+
+    def test_pinned_history_rejects_missing_draw(self):
+        incomplete = pd.DataFrame({"draw_no": [1, 2, 4]})
+        with self.assertRaises(ValueError):
+            select_pinned_history(incomplete)
 
     def test_nested_sensitivity_windows(self):
         rows = []
