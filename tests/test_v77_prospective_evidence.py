@@ -65,7 +65,11 @@ def make_lock_events(start=V77_START_DRAW, count=50):
                     "requested_overlap": config["requested_overlap"],
                     "ticket_count": config["ticket_count"],
                     "seed": config["seed"],
-                    "random_seed": config["seed"] ^ 0x5A17,
+                    "random_seed": (
+                        config["seed"] ^ 0x5A17
+                        if draw_no == V77_START_DRAW
+                        else config["seed"] ^ 0x5A17 ^ draw_no
+                    ),
                 },
                 "configuration": dict(config),
             },
@@ -188,6 +192,35 @@ class V77ProspectiveEvidenceTests(unittest.TestCase):
         )
         self.assertFalse(report["analysis_ready"])
         self.assertEqual(report["missing_lock_draws"], [V77_END_DRAW])
+
+    def test_random_control_seed_is_target_specific_after_1251(self):
+        from v52_rolling_validation import build_v51_forward_lock_event
+        from v50_predictive_engine import fit_predict_next
+        from v51_smart_picker import generate_constrained_tickets
+        from tests.test_v52_rolling_validation import synthetic_history
+
+        history = synthetic_history(240)
+        prediction = fit_predict_next(
+            history, training_window=180, min_history=180, ridge_alpha=1.0
+        )
+        probabilities = prediction["number_probabilities"].sort_values("号码")["预测入选概率"].to_numpy()
+        candidates, effective, _ = generate_constrained_tickets(
+            probabilities, prediction["pair_scores"], count=10, seed=5050,
+            pair_strength=0.5, max_overlap=4,
+        )
+        frame = pd.DataFrame([
+            {"号码": " ".join(map(str, ticket))} for ticket in candidates
+        ])
+        event = build_v51_forward_lock_event(
+            history, prediction, frame, seed=5050, pair_strength=0.5,
+            requested_overlap=4, effective_overlap=effective,
+        )
+        target = event["payload"]["metadata"]["target_draw"]
+        self.assertEqual(target, 241)
+        self.assertEqual(
+            event["payload"]["metadata"]["random_seed"],
+            5050 ^ 0x5A17 ^ target,
+        )
 
     def test_invalid_metric_ranges_are_rejected(self):
         source = make_summary(count=2)
