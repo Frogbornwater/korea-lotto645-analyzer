@@ -24,7 +24,11 @@
   "random_control": {
     "strategy": "uniform random six-number tickets",
     "ticket_count_rule": "Must equal the model ticket count and be a positive integer for each target draw.",
-    "seed_rule": "random_seed = seed XOR 0x5A17"
+    "seed_rule": {
+      "draw_1251_compatibility": "Preserve the committed 1251 lock random_seed exactly as seed XOR 0x5A17.",
+      "subsequent_draws": "For target_draw > 1251, random_seed = seed XOR 0x5A17 XOR target_draw.",
+      "purpose": "Keep the model configuration seed frozen while generating a distinct reproducible uniform-random control portfolio for each target draw."
+    }
   },
   "primary_endpoint": {
     "name": "mean_hits_difference_per_ticket",
