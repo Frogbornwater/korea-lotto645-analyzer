@@ -82,7 +82,13 @@ with c4:
 with c5:
     seed = st.number_input("固定随机种子", min_value=1, max_value=2147483646, value=8032028, step=1)
 
-ready = contiguous and len(history) >= 210
+if contiguous and last_draw <= 1250:
+    st.warning(
+        "当前手动数据仍停在第1250期。第1251期已有V5.1正式前瞻锁定，"
+        "本页面不会生成第二套1251期候选。请在开奖后手动导入并核验第1251期，"
+        "届时V8.0才会对第1252期运行独立研究。"
+    )
+ready = contiguous and len(history) >= 210 and last_draw > 1250
 if st.button("运行V5.1与V8.0同概率对照", type="primary", use_container_width=True, disabled=not ready):
     try:
         prediction = fit_predict_next(
