@@ -42,6 +42,31 @@ def load_1251_commitment(path: str | Path = DEFAULT_COMMITMENT_PATH) -> dict[str
     return raw
 
 
+def _is_1251_lock_candidate(
+    event: dict[str, Any],
+    commitment: dict[str, Any],
+) -> bool:
+    """Recognize the committed event even if its event_id was altered."""
+    expected_id = str(commitment["event_id"])
+    if str(event.get("event_id")) == expected_id:
+        return True
+    payload = event.get("payload", {})
+    metadata = payload.get("metadata", {}) if isinstance(payload, dict) else {}
+    configuration = payload.get("configuration", {}) if isinstance(payload, dict) else {}
+    try:
+        targets_1251 = int(metadata.get("target_draw", -1)) == int(commitment["target_draw"])
+    except (TypeError, ValueError):
+        targets_1251 = False
+    expected_engine = commitment["configuration"]["engine_version"]
+    engine_matches = (
+        metadata.get("engine_version") == expected_engine
+        or configuration.get("engine_version") == expected_engine
+    )
+    return targets_1251 and (
+        event.get("event_type") == "v51_forward_lock" or engine_matches
+    )
+
+
 def verify_1251_archive_bytes(
     archive_bytes: bytes,
     manifest: dict[str, Any] | None = None,
@@ -56,6 +81,7 @@ def verify_1251_archive_bytes(
         "canonical_event_sha256_matches": False,
         "event_id_matches": False,
         "target_draw_matches": False,
+        "target_event_count_matches": False,
         "history_fingerprint_matches": False,
         "configuration_matches": False,
         "model_ticket_count_matches": False,
@@ -70,16 +96,19 @@ def verify_1251_archive_bytes(
         return result
 
     event_id = str(commitment["event_id"])
-    matches = [event for event in events if str(event.get("event_id")) == event_id]
-    if not matches:
-        result["error"] = "committed_event_id_not_found"
-        return result
-    if len(matches) != 1:
-        result["error"] = "duplicate_committed_event_id"
+    candidates = [
+        event for event in events
+        if _is_1251_lock_candidate(event, commitment)
+    ]
+    if not candidates:
         return result
 
-    event = matches[0]
     result["applicable"] = True
+    if len(candidates) != 1:
+        result["error"] = "multiple_1251_lock_candidates"
+        return result
+    event = candidates[0]
+    result["target_event_count_matches"] = True
     metadata = event.get("payload", {}).get("metadata", {})
     configuration = event.get("payload", {}).get("configuration", {})
     tickets = event.get("payload", {}).get("tickets", [])
@@ -163,10 +192,9 @@ def filter_uncommitted_1251_events(
     commitment = manifest or load_1251_commitment()
     if not verification.get("applicable") or verification.get("matched"):
         return list(events)
-    committed_event_id = str(commitment["event_id"])
     return [
         event for event in events
-        if str(event.get("event_id")) != committed_event_id
+        if not _is_1251_lock_candidate(event, commitment)
     ]
 
 
@@ -181,11 +209,10 @@ def merge_events_with_1251_commitment(
     existing = list(existing_events)
     incoming = list(imported_events)
     if verification.get("applicable"):
-        committed_event_id = str(commitment["event_id"])
         # Never retain an older in-session copy when a 1251 archive is uploaded.
         existing = [
             event for event in existing
-            if str(event.get("event_id")) != committed_event_id
+            if not _is_1251_lock_candidate(event, commitment)
         ]
         if not verification.get("matched"):
             incoming = filter_uncommitted_1251_events(
