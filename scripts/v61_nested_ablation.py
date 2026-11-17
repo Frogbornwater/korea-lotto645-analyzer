@@ -140,7 +140,7 @@ def main() -> None:
                 min_history=MIN_HISTORY,
                 ridge_alpha=RIDGE_ALPHA,
                 tickets_per_draw=TICKETS_PER_DRAW,
-                seed=MASTER_SEED + fold_index * 100 + variant_index,
+                seed=MASTER_SEED + fold_index * 100,  # common random numbers across ablations
                 bootstrap_reps=1000,
                 feature_exclusions=config["feature_exclusions"],
                 pair_sampling_strength=config["pair_sampling_strength"],
