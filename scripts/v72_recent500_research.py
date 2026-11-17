@@ -9,6 +9,7 @@ only from completed earlier blocks.
 """
 from __future__ import annotations
 
+import ast
 import hashlib
 import itertools
 import json
@@ -61,8 +62,8 @@ def _draw_metrics(row: dict) -> dict[str, float]:
     clipped = np.clip(probs, 1e-9, 1.0 - 1e-9)
     chosen = np.argsort(-probs, kind="mergesort")
     top10 = len(set((chosen[:10] + 1).tolist()) & actual)
-    tickets = [[int(x) for x in ticket.split(",")] for ticket in row["V5_号码列表"].split("|")]
-    random_tickets = [[int(x) for x in ticket.split(",")] for ticket in row["随机_号码列表"].split("|")]
+    tickets = [list(map(int, ast.literal_eval(ticket))) for ticket in row["V5_号码列表"].split("|")]
+    random_tickets = [list(map(int, ast.literal_eval(ticket))) for ticket in row["随机_号码列表"].split("|")]
     model_hits = np.asarray([len(set(t) & actual) for t in tickets], dtype=float)
     random_hits = np.asarray([len(set(t) & actual) for t in random_tickets], dtype=float)
     return {
@@ -165,7 +166,7 @@ def run_research(frame: pd.DataFrame) -> dict:
 
     candidates = pd.DataFrame(candidate_results)
     expected_targets = list(range(int(draws[-TARGET_DRAWS]), int(draws[-1]) + 1))
-    if candidates.groupby("config_key")["target_draw"].apply(list).map(lambda x: x == expected_targets).all() is not True:
+    if not bool(candidates.groupby("config_key")["target_draw"].apply(list).map(lambda x: x == expected_targets).all()):
         raise RuntimeError("候选配置的目标期序列不完整或不一致。")
 
     # The first block is a preregistered fixed baseline. For every later block,
