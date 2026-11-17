@@ -95,10 +95,12 @@ class V77ProspectiveEvidenceTests(unittest.TestCase):
             V77_BOOTSTRAP_SEED,
         )
         self.assertIn("Do not stop early", " ".join(protocol["protocol_guards"]))
+        self.assertIn("independently verifiable hash-only", protocol["timestamp_anchor_policy"]["requirement"])
 
     def test_empty_and_partial_windows_are_descriptive_only(self):
         for source in (pd.DataFrame(), make_summary(count=1), make_summary(count=49)):
             report, per_draw, metrics = build_v77_evidence_report(source)
+            self.assertIn("self-reported", report["timestamp_anchor_policy"]["draws_1252_to_1300"])
             self.assertFalse(report["analysis_ready"])
             self.assertIsNone(report["primary_endpoint"]["bootstrap_95_ci"])
             self.assertEqual(report["status"], "collecting_fixed_horizon")
