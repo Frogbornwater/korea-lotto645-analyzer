@@ -147,8 +147,15 @@ def build_v77_evidence_report(
         normalized_rows: list[dict[str, Any]] = []
         for _, raw in accepted.sort_values("目标期号").iterrows():
             draw_no = int(raw["目标期号"])
-            model_ticket_count = int(_finite_number(raw["V5.1注数"], "V5.1注数", draw_no))
-            random_ticket_count = int(_finite_number(raw["随机注数"], "随机注数", draw_no))
+            model_ticket_count_value = _finite_number(raw["V5.1注数"], "V5.1注数", draw_no)
+            random_ticket_count_value = _finite_number(raw["随机注数"], "随机注数", draw_no)
+            if (
+                not model_ticket_count_value.is_integer()
+                or not random_ticket_count_value.is_integer()
+            ):
+                raise ValueError(f"第{draw_no}期注数必须为整数。")
+            model_ticket_count = int(model_ticket_count_value)
+            random_ticket_count = int(random_ticket_count_value)
             if model_ticket_count < 1 or model_ticket_count != random_ticket_count:
                 raise ValueError(f"第{draw_no}期V5.1与随机对照的注数不一致或为零。")
             model_hits = _finite_number(raw["V5.1平均命中数"], "V5.1平均命中数", draw_no)
