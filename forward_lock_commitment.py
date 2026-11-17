@@ -173,6 +173,7 @@ def verify_1251_archive_bytes(
             "canonical_event_sha256_matches",
             "event_id_matches",
             "target_draw_matches",
+            "target_event_count_matches",
             "history_fingerprint_matches",
             "configuration_matches",
             "model_ticket_count_matches",
