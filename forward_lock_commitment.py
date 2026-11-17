@@ -58,7 +58,7 @@ def _is_1251_lock_candidate(
     except (TypeError, ValueError):
         targets_1251 = False
     expected_engine = commitment.get("configuration", {}).get("engine_version")
-    engine_matches = (
+    engine_matches = expected_engine is not None and (
         metadata.get("engine_version") == expected_engine
         or configuration.get("engine_version") == expected_engine
     )
