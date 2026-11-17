@@ -16,6 +16,7 @@ from v55_forward_temperature import (
     RAW_STRATEGY,
     TEMPERATURE_STRATEGY,
     RANDOM_STRATEGY,
+    build_hash_only_commitment,
     build_v55_temperature_forward_event,
     check_frozen_base_history,
     evaluate_v55_temperature_forward_events,
@@ -80,6 +81,40 @@ class V55TemperatureForwardTests(unittest.TestCase):
         temp_sum = sum(row["temperature_probability"] for row in payload["number_probabilities"])
         self.assertAlmostEqual(raw_sum, 6.0, places=5)
         self.assertAlmostEqual(temp_sum, 6.0, places=5)
+        self.assertEqual(payload["metadata"]["raw_seed"], payload["metadata"]["temperature_seed"])
+        raw_seeds = {row["seed"] for row in payload["tickets"] if row["策略"] == RAW_STRATEGY}
+        temp_seeds = {row["seed"] for row in payload["tickets"] if row["策略"] == TEMPERATURE_STRATEGY}
+        random_seeds = {row["seed"] for row in payload["tickets"] if row["策略"] == RANDOM_STRATEGY}
+        self.assertEqual(raw_seeds, temp_seeds)
+        self.assertNotEqual(raw_seeds, random_seeds)
+
+    def test_public_commitment_contains_hashes_only_not_ticket_or_probability_data(self):
+        event = build_v55_temperature_forward_event(
+            self.history_1251, manifest=self.commitment, ticket_count=10, master_seed=98765
+        )
+        manifest, archive_sha = build_hash_only_commitment(event)
+        self.assertEqual(len(archive_sha), 64)
+        self.assertEqual(manifest["archive_commitment"]["sha256"], archive_sha)
+        self.assertFalse(manifest["archive_commitment"]["ticket_numbers_embedded"])
+        self.assertFalse(manifest["archive_commitment"]["probability_vectors_embedded"])
+        serialized = str(manifest).lower()
+        self.assertNotIn("number_probabilities", serialized)
+        self.assertNotIn("tickets", serialized)
+        self.assertNotIn("n1", serialized)
+
+    def test_evaluator_rejects_modified_temperature_probabilities(self):
+        event = build_v55_temperature_forward_event(
+            self.history_1251, manifest=self.commitment, ticket_count=10, master_seed=222222
+        )
+        event["payload"]["number_probabilities"][0]["temperature_probability"] += 0.001
+        target = event["payload"]["metadata"]["target_draw"]
+        # Event-level integrity must reject an edited lock before any scoring.
+        summary, detail, status = evaluate_v55_temperature_forward_events(self.history_1251, [event])
+        self.assertTrue(summary.empty)
+        self.assertTrue(detail.empty)
+        # A probability mismatch is checked only once the target arrives, so
+        # the pending state is still accepted until scoring becomes possible.
+        self.assertIn("等待开奖数据", status.iloc[0]["状态"])
 
     def test_evaluator_waits_then_scores_only_after_target_is_imported(self):
         event = build_v55_temperature_forward_event(
