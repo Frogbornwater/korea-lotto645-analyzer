@@ -42,3 +42,12 @@ jobs:
           path: artifacts/v55/
           if-no-files-found: error
           retention-days: 90
+      - name: Run V6.0 isolated 200-draw chronological replay
+        run: python scripts/v60_isolated_200_replay.py
+      - name: Upload V6.0 isolated replay report
+        uses: actions/upload-artifact@v4
+        with:
+          name: v60-isolated-200-replay
+          path: artifacts/v60/
+          if-no-files-found: error
+          retention-days: 90
