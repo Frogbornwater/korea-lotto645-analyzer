@@ -70,3 +70,13 @@ jobs:
           path: artifacts/v62/
           if-no-files-found: error
           retention-days: 90
+
+      - name: Run V6.3 chronological probability-ranking audit
+        run: python scripts/v63_probability_ranking_audit.py
+      - name: Upload V6.3 probability-ranking audit report
+        uses: actions/upload-artifact@v4
+        with:
+          name: v63-probability-ranking-audit
+          path: artifacts/v63/
+          if-no-files-found: error
+          retention-days: 90
