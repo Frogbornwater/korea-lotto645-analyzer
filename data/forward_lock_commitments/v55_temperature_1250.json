@@ -1,0 +1,43 @@
+{
+  "commitment_schema_version": 1,
+  "lock_id": "lotto645-v55-temperature-forward-base-1250",
+  "temperature_lock": {
+    "lock_version": "v55-temperature-lock-2",
+    "temperature": 2.875,
+    "calibration_period": [1201, 1250],
+    "calibration_draws": 50,
+    "base_last_draw": 1250,
+    "base_row_count": 1250,
+    "history_sha256": "5529086e3d3401d20b778d94a62e41f3ee2bf0a886018e986ee1ecbe46ef1d11",
+    "training_window": 500,
+    "ridge_alpha": 1.0,
+    "calibration_log_loss": 0.39264237314044276,
+    "raw_calibration_log_loss": 0.39275347435922736,
+    "grid_min": 0.25,
+    "grid_max": 4.0,
+    "grid_boundary_optimum": false
+  },
+  "source_artifact": {
+    "artifact_name": "v55-audit-bundle",
+    "artifact_id": 14349776279,
+    "workflow_run_id": 44129772806,
+    "workflow_head_sha": "1a3a441f1cc6a06c5445f856898d23129062e10d",
+    "artifact_zip_sha256": "3616629c886aa166844a874c182f64e86e0ab4e1bf022f59a4ed4c0811d6404e",
+    "forward_temperature_lock_sha256": "f9937e49e72fdcb2627392e526e2176c932226122085e8adba4721f9edc0683c"
+  },
+  "application_rule": {
+    "eligible_target_draws": "strictly greater than 1250",
+    "first_uncommitted_target_draw": 1252,
+    "reason": "Draw 1251 already has a separate immutable V5.1 forward lock. This research candidate must not create, replace, or rescore a competing 1251 lock.",
+    "temperature_is_frozen": true,
+    "refit_temperature_during_forward_evaluation": false,
+    "production_model_changed": false
+  },
+  "evidence_limits": [
+    "The temperature was selected from 50 historical prequential predictions covering draws 1201-1250; this is historical development data, not independent prospective evidence.",
+    "The separate 50-draw calibration/evaluation analysis showed only small probability-score changes whose confidence intervals included zero.",
+    "The 2.875 candidate is research-only and must not be used to rewrite the original 1251 V5.1 archive.",
+    "A prospective comparison must retain raw V5 and uniform random controls, preserve the frozen temperature, and score only after the target draw is manually imported.",
+    "All draw data must be manually supplied by the user. No lottery website, API, scraping, mirror, or automatic synchronization is permitted."
+  ]
+}
