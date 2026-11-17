@@ -173,6 +173,17 @@ class V76ForwardLockTests(unittest.TestCase):
         changed_result = verify_1251_archive_bytes(changed_bytes, manifest)
         self.assertFalse(changed_result["matched"])
 
+        # Keep the committed event byte-for-byte equivalent while changing
+        # the archive envelope: event-only matching must not pass full match.
+        envelope_changed = json.loads(archive.decode("utf-8"))
+        envelope_changed["extra_uncommitted_metadata"] = {"reviewed": True}
+        envelope_bytes = json.dumps(envelope_changed, ensure_ascii=False).encode("utf-8")
+        envelope_result = verify_1251_archive_bytes(envelope_bytes, manifest)
+        self.assertTrue(envelope_result["canonical_event_sha256_matches"])
+        self.assertFalse(envelope_result["raw_file_sha256_matches"])
+        self.assertFalse(envelope_result["canonical_archive_sha256_matches"])
+        self.assertFalse(envelope_result["matched"])
+
 
 if __name__ == "__main__":
     unittest.main()
