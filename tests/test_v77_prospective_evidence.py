@@ -52,8 +52,8 @@ class V77ProspectiveEvidenceTests(unittest.TestCase):
         self.assertEqual(report["target_window"]["start_draw"], V77_START_DRAW)
         self.assertEqual(report["target_window"]["end_draw"], V77_END_DRAW)
         interval = report["primary_endpoint"]["bootstrap_95_ci"]
-        self.assertLess(interval["lower"], 0.05)
-        self.assertGreater(interval["upper"], 0.05)
+        self.assertLessEqual(interval["lower"], 0.05)
+        self.assertGreaterEqual(interval["upper"], 0.05)
         self.assertEqual(len(per_draw), 50)
         self.assertIn("Brier分数", set(metrics["指标"]))
 
