@@ -1,0 +1,40 @@
+name: V8.0 probability-faithful sampling
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "v80_probability_sampling.py"
+      - "tests/test_v80_probability_sampling.py"
+      - "pages/3_V80概率一致抽样研究.py"
+      - ".github/workflows/v80-probability-sampling.yml"
+      - "v50_predictive_engine.py"
+      - "v51_smart_picker.py"
+  push:
+    branches: [main, v8-0-probability-faithful-sampler]
+    paths:
+      - "v80_probability_sampling.py"
+      - "tests/test_v80_probability_sampling.py"
+      - "pages/3_V80概率一致抽样研究.py"
+      - ".github/workflows/v80-probability-sampling.yml"
+      - "v50_predictive_engine.py"
+      - "v51_smart_picker.py"
+
+jobs:
+  probability-sampler:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install numerical test dependencies
+        run: python -m pip install --upgrade numpy pandas
+      - name: Compile V8.0 and research page
+        run: python -m py_compile v80_probability_sampling.py pages/3_V80概率一致抽样研究.py
+      - name: Test V8.0 probability sampler
+        run: python -m unittest discover -s tests -p "test_v80_probability_sampling.py" -v
+      - name: Regression test V5.0 and V5.1 samplers
+        run: |
+          python -m unittest discover -s tests -p "test_v50_predictive_engine.py" -v
+          python -m unittest discover -s tests -p "test_v51_smart_picker.py" -v
