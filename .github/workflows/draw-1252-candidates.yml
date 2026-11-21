@@ -37,6 +37,8 @@ jobs:
           python -m unittest discover -s tests -p "test_v81_batch_sampler.py" -v
           python -m unittest discover -s tests -p "test_v82_pairwise_joint.py" -v
           python -m unittest discover -s tests -p "test_v83_feature_audit.py" -v
+      - name: Generate the matching V8.3 feature audit report
+        run: python scripts/v83_first_order_feature_audit.py
       - name: Generate draw 1252 candidate comparison
         run: python scripts/draw_1252_candidates.py
       - name: Upload draw 1252 candidate report
