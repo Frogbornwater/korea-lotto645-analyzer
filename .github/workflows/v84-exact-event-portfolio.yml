@@ -1,0 +1,45 @@
+name: V8.4 exact batch-event portfolio research
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "v84_event_portfolio.py"
+      - "scripts/v84_exact_portfolio_research.py"
+      - "scripts/v84_exact_evaluator.cpp"
+      - "tests/test_v84_event_portfolio.py"
+      - ".github/workflows/v84-exact-event-portfolio.yml"
+  push:
+    branches: [main, research/v84-exact-event-portfolio]
+    paths:
+      - "v84_event_portfolio.py"
+      - "scripts/v84_exact_portfolio_research.py"
+      - "scripts/v84_exact_evaluator.cpp"
+      - "tests/test_v84_event_portfolio.py"
+      - ".github/workflows/v84-exact-event-portfolio.yml"
+
+jobs:
+  exact-event-portfolio:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+      - name: Install research dependencies
+        run: python -m pip install numpy
+      - name: Compile V8.4 modules
+        run: python -m py_compile v84_event_portfolio.py scripts/v84_exact_portfolio_research.py
+      - name: Test V8.4 graph construction and exact null baseline
+        run: python -m unittest discover -s tests -p "test_v84_event_portfolio.py" -v
+      - name: Enumerate all 8,145,060 possible outcomes for every candidate
+        run: python scripts/v84_exact_portfolio_research.py
+      - name: Upload exact V8.4 portfolio report
+        uses: actions/upload-artifact@v4
+        with:
+          name: v84-exact-event-portfolio-report
+          path: artifacts/v84/
+          if-no-files-found: error
+          retention-days: 90
