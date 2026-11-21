@@ -14,7 +14,7 @@ on:
       - "v81_batch_sampler.py"
       - "data/lotto645.csv"
   push:
-    branches: [main, research/v85-probability-weighted-graph-portfolio]
+    branches: [main]
     paths:
       - "v85_hybrid_portfolio.py"
       - "v85_hybrid_backtest.py"
