@@ -1,0 +1,84 @@
+{
+  "manifest_schema_version": 1,
+  "commitment_id": "lotto645-v8x-research-candidate-draw-1252",
+  "event_type": "draw_1252_research_candidate_comparison",
+  "target_draw": 1252,
+  "event_created_at_utc": "2026-11-21T13:08:37+00:00",
+  "history": {
+    "first_draw": 1,
+    "last_draw": 1251,
+    "rows": 1251,
+    "raw_csv_sha256": "ef6394cd488506fd4e6e2b59bf46fd0435d3c99b3b8ff3e888a9fe5da04f371e",
+    "normalized_history_sha256": "f5efc865736eca87727285b6e2dbd032c7c9c7576df248bbcb503892a35099e",
+    "draw_1251": {
+      "main_numbers": [
+        14,
+        18,
+        19,
+        29,
+        40,
+        45
+      ],
+      "bonus": 1,
+      "date": "",
+      "provided_by_user": true
+    }
+  },
+  "archive_commitment": {
+    "raw_file_sha256": "88cd4557a8c56ef8ff4b73260721c44731a178ad7dd6ee90daa6fc5553d813b7",
+    "canonical_payload_sha256": "2a13fbd94ca131037902aba0261f51856de0741ea1304e3fd2cb72a7c20fca16",
+    "artifact_zip_sha256": "7595304500ce67cfe2f468085bfed0ec35aca63b475feba4989caebd172d7905",
+    "raw_file_name": "draw_1252_candidate_comparison.json",
+    "ticket_numbers_embedded": false,
+    "github_actions_artifact_id": 14708600666,
+    "github_actions_run_id": 44907133123,
+    "github_actions_artifact_url": "https://github.com/Frogbornwater/korea-lotto645-analyzer/actions/runs/44907133123/artifacts/14708600666",
+    "source_commit_sha": "f325927843446297a30aa467e562ef9e802f5a28",
+    "retention_days": 90
+  },
+  "configuration": {
+    "marginal_model": "V5.0.0-predictive-research",
+    "training_window": 500,
+    "ridge_alpha": 1,
+    "min_history": 180,
+    "ticket_count_per_group": 10,
+    "ticket_size": 6,
+    "sampling_seeds": {
+      "V5_baseline": 12520501,
+      "V8_0": 12520800,
+      "V8_1": 12520801,
+      "uniform_random_control": 12520700
+    },
+    "V8_2": {
+      "pair_prior_draws": 1000,
+      "pair_strength": 0.5,
+      "residual_cap": 0.75,
+      "pair_training_draws": 500
+    },
+    "V8_3": {
+      "audit_target_start_draw": 752,
+      "audit_target_end_draw": 1251,
+      "holm_supported_features": []
+    }
+  },
+  "evidence_boundary": {
+    "research_only": true,
+    "production_model_changed": false,
+    "prediction_superiority_proven": false,
+    "V8_2_generates_six_number_tickets": false,
+    "V8_3_generates_six_number_tickets": false,
+    "official_lottery_site_or_api_accessed": false,
+    "notes": [
+      "V5, V8.0, V8.1 and a uniform random control each generated ten six-number candidates.",
+      "V8.2 was used only for pair-inclusion probability diagnostics; its 500-draw test did not support incremental pairwise signal.",
+      "V8.3 was used only for an eight-feature ablation audit; no feature passed Holm adjustment.",
+      "This archive records candidate generation, not evidence that any group outperforms the uniform lottery baseline."
+    ]
+  },
+  "data_policy": "manual_csv_only_no_external_lottery_site_or_api_access",
+  "timestamp_provenance": {
+    "event_timestamp_provenance": "generated_by_GitHub_Actions_workflow",
+    "github_commitment_provenance": "this hash-only manifest is committed to repository history; use its commit timestamp as public commitment anchor",
+    "limitation": "The workflow artifact and manifest record candidate bytes and their hashes. The commit anchor can establish that the matching candidates existed no later than the repository commit; any claim that this predates the actual draw must be checked against a future manually supplied draw date."
+  }
+}

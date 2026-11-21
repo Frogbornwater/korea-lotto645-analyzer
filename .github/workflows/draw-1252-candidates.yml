@@ -1,0 +1,50 @@
+name: Draw 1252 forward candidate execution
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "data/lotto645.csv"
+      - "scripts/draw_1252_candidates.py"
+      - ".github/workflows/draw-1252-candidates.yml"
+      - "v50_predictive_engine.py"
+      - "v80_probability_sampling.py"
+      - "v81_batch_sampler.py"
+      - "v82_pairwise_joint.py"
+      - "v83_feature_audit.py"
+
+permissions:
+  contents: read
+
+jobs:
+  draw-1252-candidates:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt
+      - name: Compile candidate generation and model modules
+        run: python -m py_compile scripts/draw_1252_candidates.py v50_predictive_engine.py v80_probability_sampling.py v81_batch_sampler.py v82_pairwise_joint.py v83_feature_audit.py
+      - name: Run production and sampler regression tests
+        run: |
+          python -m unittest discover -s tests -p "test_v50_predictive_engine.py" -v
+          python -m unittest discover -s tests -p "test_v80_probability_sampling.py" -v
+          python -m unittest discover -s tests -p "test_v81_batch_sampler.py" -v
+          python -m unittest discover -s tests -p "test_v82_pairwise_joint.py" -v
+          python -m unittest discover -s tests -p "test_v83_feature_audit.py" -v
+      - name: Generate the matching V8.3 feature audit report
+        run: python scripts/v83_first_order_feature_audit.py
+      - name: Generate draw 1252 candidate comparison
+        run: python scripts/draw_1252_candidates.py
+      - name: Upload draw 1252 candidate report
+        uses: actions/upload-artifact@v4
+        with:
+          name: draw-1252-candidate-comparison
+          path: artifacts/draw1252/draw_1252_candidate_comparison.json
+          if-no-files-found: error
+          retention-days: 90

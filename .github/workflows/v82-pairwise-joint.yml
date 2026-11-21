@@ -10,6 +10,7 @@ on:
       - ".github/workflows/v82-pairwise-joint.yml"
       - "v80_probability_sampling.py"
       - "v50_predictive_engine.py"
+      - "data/lotto645.csv"
   push:
     branches: [main, research/v82-pairwise-joint-forecast]
     paths:

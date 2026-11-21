@@ -31,6 +31,9 @@ class V55TemperatureForwardTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         base = validate_frame(pd.read_csv(ROOT / "data" / "lotto645.csv"))
+        # Keep this fixture anchored to the committed 1-1250 V5.5 prefix.
+        # The repository CSV now includes the actual user-provided draw 1251.
+        base = base.loc[base["draw_no"] <= 1250].copy()
         # Synthetic draw 1251 is used only inside tests. It is never written to
         # data/lotto645.csv and is not presented as a real lottery result.
         synthetic_1251 = pd.DataFrame([{
@@ -107,12 +110,15 @@ class V55TemperatureForwardTests(unittest.TestCase):
         self.assertEqual(self.commitment["temperature_lock"]["temperature"], 2.875)
         self.assertFalse(self.commitment["application_rule"]["production_model_changed"])
 
-    def test_current_1250_history_cannot_create_a_competing_1251_lock(self):
-        history_1250 = pd.read_csv(ROOT / "data" / "lotto645.csv")
-        audit = check_frozen_base_history(history_1250, self.commitment)
+    def test_imported_1251_allows_only_a_1252_temperature_research_lock(self):
+        actual_history = pd.read_csv(ROOT / "data" / "lotto645.csv")
+        audit = check_frozen_base_history(actual_history, self.commitment)
         self.assertTrue(audit["ok"])
-        with self.assertRaisesRegex(ValueError, "必须先手动导入并核验第1251期"):
-            build_v55_temperature_forward_event(history_1250, manifest=self.commitment)
+        self.assertEqual(audit["history_last_draw"], 1251)
+        event = build_v55_temperature_forward_event(
+            actual_history, manifest=self.commitment, ticket_count=10, master_seed=77551252
+        )
+        self.assertEqual(event["payload"]["metadata"]["target_draw"], 1252)
 
     def test_date_format_does_not_change_frozen_number_history(self):
         audit = check_frozen_base_history(self.history_1251, self.commitment)

@@ -9,6 +9,11 @@ on:
       - "scripts/v83_first_order_feature_audit.py"
       - ".github/workflows/v83-feature-audit.yml"
       - "v50_predictive_engine.py"
+      - "data/lotto645.csv"
+      - "scripts/draw_1252_candidates.py"
+      - "v80_probability_sampling.py"
+      - "v81_batch_sampler.py"
+      - "v82_pairwise_joint.py"
   push:
     branches: [main, research/v83-first-order-feature-audit]
     paths:
@@ -36,6 +41,15 @@ jobs:
         run: python -m unittest discover -s tests -p "test_v83_feature_audit.py" -v
       - name: Run 500-draw prequential feature audit
         run: python scripts/v83_first_order_feature_audit.py
+      - name: Generate draw 1252 candidate comparison using V5, V8.0, V8.1 and current V8.2/V8.3 diagnostics
+        run: python scripts/draw_1252_candidates.py
+      - name: Upload draw 1252 candidate report
+        uses: actions/upload-artifact@v4
+        with:
+          name: draw-1252-candidate-comparison
+          path: artifacts/draw1252/draw_1252_candidate_comparison.json
+          if-no-files-found: error
+          retention-days: 90
       - name: Upload V8.3 feature audit report and detail
         uses: actions/upload-artifact@v4
         with:
