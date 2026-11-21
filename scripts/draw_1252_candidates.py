@@ -127,15 +127,36 @@ def build_report() -> dict[str, Any]:
         for k in top_pair_order
     ]
 
-    # V8.3 is an ablation audit, not a ticket generator. The last completed
-    # 500-draw audit found no feature passing its 32-test Holm gate; hence all
-    # eight first-order features remain in the V5 baseline.
+    # V8.3 is an ablation audit, not a ticket generator. Read the report
+    # generated immediately before this script in the same CI job and verify
+    # that it used this exact complete history fingerprint.
+    v83_report_path = ROOT / "artifacts" / "v83" / "v83_feature_audit_report.json"
+    if not v83_report_path.exists():
+        raise FileNotFoundError("V8.3 report missing; candidate generation must follow the V8.3 audit.")
+    v83_report = json.loads(v83_report_path.read_text(encoding="utf-8"))
+    expected_matrix_hash = hashlib.sha256(matrix.tobytes()).hexdigest()
+    if (
+        int(v83_report.get("target_end_draw", -1)) != 1251
+        or v83_report.get("data_fingerprint_sha256") != expected_matrix_hash
+    ):
+        raise ValueError("V8.3 audit report does not match the current history through draw 1251.")
+    supported_features = list(v83_report.get("incremental_features_supported_after_holm", []))
     v83_audit = {
         "role": "first_order_feature_contribution_audit_only",
-        "last_completed_historical_audit": "500-draw prequential audit through draw 1250",
-        "supported_features_after_holm": [],
-        "action": "retain all eight first-order features; do not change V5 weights",
-        "not_recomputed_for_this_single_target": True,
+        "research_id": v83_report.get("research_id"),
+        "target_range": [
+            int(v83_report.get("target_start_draw", -1)),
+            int(v83_report.get("target_end_draw", -1)),
+        ],
+        "data_fingerprint_sha256": v83_report.get("data_fingerprint_sha256"),
+        "supported_features_after_holm": supported_features,
+        "feature_summaries": v83_report.get("feature_summaries", []),
+        "action": (
+            "retain all eight first-order features; no production feature changes from this retrospective audit"
+            if not supported_features else
+            "retain all eight first-order features; any supported feature requires separate prospective replication"
+        ),
+        "production_model_changed": False,
         "features_retained": [
             "recent_30_z", "recent_60_z", "recent_120_z", "recent_240_z",
             "long_frequency_z", "trend_30_minus_120", "ewma_35_z",
