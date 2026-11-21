@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+# Forward-lock regression fixture includes the manually imported draw 1251.
 import hashlib
 import json
 import unittest
