@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""V8.5 strictly prequential comparison of V5, V8.0, V8.1, V8.5 and random."""
+"""V8.5 strictly prequential comparison of V5, V8.1, V8.5 and random."""
 from __future__ import annotations
 
 import hashlib
@@ -19,11 +19,10 @@ from v50_predictive_engine import (
     build_number_features,
     generate_tickets,
 )
-from v80_probability_sampling import generate_probability_faithful_tickets
 from v81_batch_sampler import generate_batch_quota_portfolio
 from v85_hybrid_portfolio import V85_VERSION, generate_probability_weighted_portfolio
 
-METHODS = ("V5", "V8.0", "V8.1", "V8.5", "随机")
+METHODS = ("V5", "V8.1", "V8.5", "随机")
 METRICS = (
     "mean_hits", "ticket_3plus", "ticket_4plus",
     "batch_3plus", "batch_4plus", "best_hits", "total_hits",
@@ -144,9 +143,6 @@ def run_v85_walk_forward(
         v5_tickets = generate_tickets(
             probabilities, pair_scores, tickets_per_draw, target_seed, pair_strength=0.5
         )
-        v80_tickets, _, _ = generate_probability_faithful_tickets(
-            probabilities, count=tickets_per_draw, seed=target_seed ^ 0x80080
-        )
         v81_tickets, v81_report = generate_batch_quota_portfolio(
             probabilities, ticket_count=tickets_per_draw, sample_size=6, seed=quota_seed
         )
@@ -163,7 +159,7 @@ def run_v85_walk_forward(
             raise RuntimeError("V8.1与V8.5未使用相同的批次号码配额。")
 
         portfolios = {
-            "V5": v5_tickets, "V8.0": v80_tickets, "V8.1": v81_tickets,
+            "V5": v5_tickets, "V8.1": v81_tickets,
             "V8.5": v85_tickets, "随机": random_tickets,
         }
         row: dict[str, Any] = {
@@ -191,7 +187,7 @@ def run_v85_walk_forward(
     detail = pd.DataFrame(rows)
     comparisons = []
     primary_p = []
-    for offset, benchmark in enumerate(("V5", "V8.0", "V8.1", "随机")):
+    for offset, benchmark in enumerate(("V5", "V8.1", "随机")):
         difference = (
             detail[f"V8.5_{PRIMARY_METRIC}"].to_numpy(dtype=float)
             - detail[f"{benchmark}_{PRIMARY_METRIC}"].to_numpy(dtype=float)
@@ -253,7 +249,6 @@ def run_v85_walk_forward(
         "data_fingerprint_sha256": hashlib.sha256(clean.to_csv(index=False).encode("utf-8")).hexdigest(),
         "methods": {
             "V5": "V5 sequential weighted ticket sampling with pair-strength 0.5",
-            "V8.0": "conditional-Bernoulli fixed-size sampling preserving each ticket's V5 marginals",
             "V8.1": "dependent-rounded batch quotas with V8.1 row allocation",
             "V8.5": "same V8.1 batch quotas allocated under V8.4 pairwise-overlap-at-most-one structure",
             "随机": "uniform random distinct-ticket control",
