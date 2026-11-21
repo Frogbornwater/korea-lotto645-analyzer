@@ -1,0 +1,51 @@
+name: V8.5 probability-weighted hybrid portfolio research
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "v85_hybrid_portfolio.py"
+      - "v85_hybrid_backtest.py"
+      - "scripts/v85_hybrid_portfolio_research.py"
+      - "tests/test_v85_hybrid_portfolio.py"
+      - ".github/workflows/v85-hybrid-portfolio.yml"
+      - "v50_predictive_engine.py"
+      - "v80_probability_sampling.py"
+      - "v81_batch_sampler.py"
+      - "data/lotto645.csv"
+  push:
+    branches: [main]
+    paths:
+      - "v85_hybrid_portfolio.py"
+      - "v85_hybrid_backtest.py"
+      - "scripts/v85_hybrid_portfolio_research.py"
+      - "tests/test_v85_hybrid_portfolio.py"
+      - ".github/workflows/v85-hybrid-portfolio.yml"
+
+jobs:
+  hybrid-portfolio:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt
+      - name: Compile V8.5 modules
+        run: python -m py_compile v85_hybrid_portfolio.py v85_hybrid_backtest.py scripts/v85_hybrid_portfolio_research.py
+      - name: Run V8.5 tests
+        run: python -m unittest discover -s tests -p "test_v85_hybrid_portfolio.py" -v
+      - name: Regression test V8.1 quota sampler
+        run: python -m unittest discover -s tests -p "test_v81_batch_sampler.py" -v
+      - name: Run 500-draw strictly prequential V8.5 comparison
+        run: python scripts/v85_hybrid_portfolio_research.py
+      - name: Upload V8.5 report and per-draw detail
+        uses: actions/upload-artifact@v4
+        with:
+          name: v85-hybrid-portfolio-research
+          path: artifacts/v85/
+          if-no-files-found: error
+          retention-days: 90
