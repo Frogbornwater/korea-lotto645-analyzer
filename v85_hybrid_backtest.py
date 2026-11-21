@@ -278,7 +278,7 @@ def run_v85_walk_forward(
         "official_lottery_site_or_api_accessed": False,
         "elapsed_seconds": float(time.perf_counter() - started),
         "interpretation": (
-            "This is a strictly prequential historical comparison of five ten-ticket "
+            "This is a strictly prequential historical comparison of four ten-ticket "
             "portfolio methods. The V8.5-vs-V8.1 comparison uses identical randomized "
             "integer batch quotas and changes only the ticket-row allocation constraint. "
             "All results remain retrospective and do not authorize production promotion."
