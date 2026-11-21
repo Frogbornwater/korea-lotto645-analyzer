@@ -88,15 +88,15 @@ def make_synthetic_v51_event(history, target_draw):
 
 
 class V76ForwardLockTests(unittest.TestCase):
-    def test_1251_real_history_prefix_matches_committed_manifest(self):
+    def test_1251_real_history_prefix_and_user_result_match_committed_manifest(self):
         manifest = load_1251_commitment()
         history = pd.read_csv(ROOT / "data" / "lotto645.csv")
         audit = audit_1251_history_prefix(history, manifest)
         self.assertTrue(audit["prefix_verified"])
         self.assertEqual(audit["prefix_rows_found"], 1250)
-        self.assertEqual(audit["current_history_last_draw"], 1250)
-        self.assertFalse(audit["target_result_present"])
-        self.assertEqual(audit["status"], "awaiting_target_result_prefix_verified")
+        self.assertEqual(audit["current_history_last_draw"], 1251)
+        self.assertTrue(audit["target_result_present"])
+        self.assertEqual(audit["status"], "target_result_available_prefix_verified")
 
     def test_mismatched_committed_1251_event_is_excluded_from_scoring(self):
         event = {"event_id": "committed-1251", "event_type": "v51_forward_lock"}
