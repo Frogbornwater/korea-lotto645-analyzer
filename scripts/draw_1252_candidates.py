@@ -41,6 +41,7 @@ MIN_HISTORY = 180
 V5_SEED = 12520501
 V80_SEED = 12520800
 V81_SEED = 12520801
+RANDOM_SEED = 12520700
 V82_PAIR_PRIOR_DRAWS = 1000.0
 V82_PAIR_STRENGTH = 0.5
 
@@ -95,6 +96,13 @@ def build_report() -> dict[str, Any]:
     # V8.1: batch-level unbiased integer quotas; not identical per-ticket marginals.
     v81_tickets, v81_batch = generate_batch_quota_portfolio(
         p_v5, ticket_count=10, sample_size=6, seed=V81_SEED
+    )
+
+    # Uniform random control: ten independent six-number draws from the
+    # theoretical uniform distribution over all C(45,6) tickets.
+    random_tickets = generate_tickets(
+        np.full(45, 6.0 / 45.0), None, count=10,
+        seed=RANDOM_SEED, pair_strength=0.0,
     )
 
     # V8.2: actual pairwise inclusion probabilities. It does not define a
@@ -218,6 +226,12 @@ def build_report() -> dict[str, Any]:
                 "sampler": "dependent-rounding batch quota portfolio",
                 "batch_diagnostics": v81_batch,
                 "interpretation": "batch expected appearances are preserved; individual ticket marginals are not identical",
+            },
+            "Uniform_random_control": {
+                "tickets": fmt_tickets(random_tickets),
+                "seed": RANDOM_SEED,
+                "sampler": "uniform six-number subset sampling without replacement",
+                "theoretical_probability_per_ticket": 1.0 / 8145060.0,
             },
         },
         "V8.2_pairwise_diagnostic": {
