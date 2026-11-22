@@ -71,6 +71,7 @@ from forward_lock_commitment import (
 )
 from v53_randomized_audit import run_multi_seed_random_audit
 from v50_backtest import run_v50_walk_forward
+from v93_multiscale_prequential import analyze_v93
 from scripts.v55_prequential_temperature_calibration import run_experiment as run_v55_temperature_experiment
 from scripts.v55_build_audit_bundle import build_forward_lock as build_v55_forward_temperature_lock
 from v40_store import (
@@ -188,19 +189,105 @@ show_legacy_tools = st.sidebar.checkbox(
     "显示高级研究工具（旧版）", value=False,
     help="默认隐藏重复的旧版优化与研究页面；需要检查历史实验时可临时展开。"
 )
-core_tabs = ["系统总览", "智能选号", "历史统计", "数据管理", "V5.5研究与前瞻验证"]
+core_tabs = ["系统总览", "智能选号", "历史统计", "数据管理", "V5.5研究与前瞻验证", "V9.3多尺度研究"]
 legacy_tabs = [
     "回测中心", "单模型参数实验", "V3.7联合优化", "V3.8稳健研究",
     "模型集成", "组合优化", "模型管理", "选号复盘", "V4.0研究治理",
     "V5.0预测研究", "V5.2逐期验证"
 ]
 tab_pages = st.tabs(core_tabs + (legacy_tabs if show_legacy_tools else []))
-page_overview, page_pick, page_stats, page_data, page_v55 = tab_pages[:5]
+page_overview, page_pick, page_stats, page_data, page_v55, page_v93 = tab_pages[:6]
 if show_legacy_tools:
     (
         page_backtest, page_optimizer, page_joint, page_robust, page_ensemble,
         page_portfolio, page_models, page_review, page_v40, page_v50, page_v52
     ) = tab_pages[5:]
+
+with page_v93:
+    st.subheader("V9.3 多时间尺度逐期概率研究")
+    st.caption("研究模块：20/30/50/100/200/300/500/800/1000期固定窗口 + 等权多窗口融合；严格逐期前瞻回放。")
+    st.warning(
+        "这是研究与审计页面，不会改变智能选号中的正式模型。此前历史研究没有证明这些策略优于均匀随机基准；"
+        "本页重新运行得到的历史结果仍属于回溯性证据，不等于未来预测优势。"
+    )
+    v93_cols = st.columns(3)
+    v93_cols[0].metric("研究版本", "V9.3")
+    v93_cols[1].metric("窗口策略", "9种 + 融合")
+    v93_cols[2].metric("目标期起点", "训练满1000期后")
+    st.markdown(
+        "- 主指标：45个号码边际入选概率的逐期 Brier Score。\n"
+        "- 辅助指标：Bernoulli LogLoss、Top-6 命中数。\n"
+        "- 不确定性：10期区块移动 Bootstrap 与区块符号翻转检验。\n"
+        "- 多重比较：9个固定窗口及等权融合统一进行 Holm 校正。"
+    )
+    if len(df) < 1001:
+        st.info(f"当前只有{len(df)}期有效数据；V9.3至少需要1001期，暂时不能运行。")
+    elif not quality.get("range_complete", False):
+        st.error("当前历史期号存在缺口。请先手动补齐连续历史数据，再运行严格逐期研究。")
+    else:
+        st.caption(f"当前数据：第{quality['first_draw']}—{quality['last_draw']}期，共{len(df)}期。数据只从当前手动导入文件读取。")
+        if st.button("运行 V9.3 多尺度研究", type="primary", use_container_width=True, key="v93_run_research"):
+            try:
+                with st.spinner("正在执行严格逐期回放与区块统计检验…"):
+                    ordered = df.sort_values("draw_no")
+                    draw_ids = ordered["draw_no"].astype(int).tolist()
+                    draw_numbers = ordered[[f"n{i}" for i in range(1, 7)]].astype(int).values.tolist()
+                    report = analyze_v93(draw_ids, draw_numbers, bootstrap_reps=10000)
+                    st.session_state["v93_multiscale_ui_report"] = report
+                    st.session_state["v93_multiscale_ui_fingerprint"] = (
+                        f"{draw_ids[0]}-{draw_ids[-1]}-{len(draw_ids)}"
+                    )
+            except Exception as exc:
+                st.error(f"V9.3研究运行失败：{type(exc).__name__}: {exc}")
+        report = st.session_state.get("v93_multiscale_ui_report")
+        current_fingerprint = f"{int(df['draw_no'].min())}-{int(df['draw_no'].max())}-{len(df)}"
+        if isinstance(report, dict):
+            if st.session_state.get("v93_multiscale_ui_fingerprint") != current_fingerprint:
+                st.warning("当前导入数据与上次研究所用数据范围不同。请重新运行，避免误读旧结果。")
+            else:
+                protocol = report["protocol"]
+                st.markdown("#### 本次研究范围")
+                pcols = st.columns(4)
+                pcols[0].metric("目标期数", f"{protocol['target_draws']:,}")
+                pcols[1].metric("目标起始期", protocol["target_start_draw"])
+                pcols[2].metric("目标结束期", protocol["target_end_draw"])
+                pcols[3].metric("Bootstrap次数", "10,000")
+                metric_rows = []
+                for name, item in report["metrics"].items():
+                    label = "等权多窗口融合" if name == "equal_multiscale" else name.replace("window_", "") + "期窗口"
+                    ci = item["brier_difference_95ci_block10"]
+                    metric_rows.append({
+                        "策略": label,
+                        "Brier": item["mean_brier"],
+                        "相对均匀基准差值": item["brier_difference_vs_uniform"],
+                        "差值95%区间下限": ci[0],
+                        "差值95%区间上限": ci[1],
+                        "LogLoss": item["mean_logloss"],
+                        "Top6平均命中": item["mean_top6_hits"],
+                        "Holm校正p值": item["brier_holm_adjusted_p"],
+                    })
+                result_frame = pd.DataFrame(metric_rows)
+                st.markdown("#### 各窗口研究结果")
+                st.dataframe(result_frame.round(7), hide_index=True, use_container_width=True)
+                st.caption("Brier差值 = 策略Brier − 均匀概率基准Brier；负值才表示该指标优于基准。")
+                st.plotly_chart(
+                    px.bar(
+                        result_frame, x="策略", y="相对均匀基准差值",
+                        title="各策略 Brier 差值（低于0才优于均匀基准）"
+                    ),
+                    use_container_width=True,
+                )
+                if report["interpretation"]["predictive_advantage_established"]:
+                    st.success("研究规则满足预测优势候选门槛；仍需独立前瞻验证。")
+                else:
+                    st.warning("当前研究没有建立预测优势。不要仅凭窗口排名选择模型或替换正式选号器。")
+                st.download_button(
+                    "下载 V9.3 研究报告 JSON",
+                    json.dumps(report, ensure_ascii=False, indent=2, allow_nan=False),
+                    "v93_multiscale_prequential_report.json",
+                    "application/json",
+                    key="v93_download_report",
+                )
 
 with page_overview:
     st.subheader("系统状态")
