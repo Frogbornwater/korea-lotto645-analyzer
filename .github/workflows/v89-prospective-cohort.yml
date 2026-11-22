@@ -1,0 +1,29 @@
+name: V8.9 prospective cohort audit tests
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "v89_prospective_cohort.py"
+      - "scripts/v89_prospective_cohort.py"
+      - "tests/test_v89_prospective_cohort.py"
+      - "V8.9_PROSPECTIVE_COHORT.md"
+      - ".github/workflows/v89-prospective-cohort.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+      - run: python -m pip install -r requirements.txt
+      - run: python -m py_compile v89_prospective_cohort.py scripts/v89_prospective_cohort.py
+      - run: python -m unittest discover -s tests -p "test_v89_prospective_cohort.py" -v
+      - run: python -m unittest discover -s tests -p "test_v87_forward_protocol.py" -v
