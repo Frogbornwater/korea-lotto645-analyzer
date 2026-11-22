@@ -118,7 +118,17 @@ def analyze_v90_probability(records: list[dict[str, Any]], *, bootstrap_reps: in
 def run_v90(scores_dir: str | Path, output_path: str | Path, *, bootstrap_reps: int = 10000) -> dict[str, Any]:
     root = Path(scores_dir)
     accepted, excluded = load_score_cohort(sorted(root.glob("*.json")))
-    report = analyze_v90_probability(accepted, bootstrap_reps=bootstrap_reps)
+    probability_ready = []
+    for item in accepted:
+        if not isinstance(item["score"].get("v5_probability_metrics"), dict):
+            excluded.append({
+                "target_draw": item["target_draw"],
+                "file": item["file"],
+                "reason": "missing_v5_probability_metrics",
+            })
+        else:
+            probability_ready.append(item)
+    report = analyze_v90_probability(probability_ready, bootstrap_reps=bootstrap_reps)
     report["excluded_records"] = excluded
     target = Path(output_path)
     target.parent.mkdir(parents=True, exist_ok=True)
