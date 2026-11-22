@@ -1,0 +1,29 @@
+name: V9.5 common-horizon V9.4 vs V5.1 audit
+on:
+  workflow_dispatch:
+  push:
+    branches: [v95-v94-v51-common-prequential-audit]
+    paths:
+      - "v95_common_horizon_audit.py"
+      - ".github/workflows/v95-common-horizon-audit.yml"
+      - "v94_multiscale_smart_picker.py"
+      - "v93_multiscale_prequential.py"
+      - "v50_predictive_engine.py"
+      - "v51_smart_picker.py"
+      - "data/lotto645.csv"
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: python -m pip install --upgrade pip numpy pandas
+      - run: python v95_common_horizon_audit.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: v95-common-horizon-audit
+          path: artifacts/v95_common_horizon/
+          if-no-files-found: error
