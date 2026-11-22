@@ -59,22 +59,38 @@ def _log_loss(probabilities: np.ndarray, labels: np.ndarray) -> float:
     return float(-np.mean(y * np.log(p) + (1.0 - y) * np.log(1.0 - p)))
 
 
+def _temperature_loss_vector(probabilities: np.ndarray, labels: np.ndarray) -> np.ndarray:
+    """Precompute one forecast's loss for every fixed temperature candidate."""
+    return np.asarray([
+        _log_loss(_temperature_transform(probabilities, temperature), labels)
+        for temperature in TEMPERATURE_GRID
+    ], dtype=float)
+
+
+def _select_temperature_from_losses(loss_vectors: list[np.ndarray]) -> tuple[float, dict[str, float]]:
+    if not loss_vectors:
+        raise ValueError("温度选择需要至少一条历史预测损失向量。")
+    matrix = np.vstack(loss_vectors)
+    if matrix.shape[1] != len(TEMPERATURE_GRID) or not np.all(np.isfinite(matrix)):
+        raise ValueError("历史温度损失矩阵维度错误或包含非有限值。")
+    values = matrix.mean(axis=0)
+    scores = {str(t): float(values[i]) for i, t in enumerate(TEMPERATURE_GRID)}
+    # Deterministic tie-break: prefer the value closest to no calibration (T=1).
+    chosen = min(TEMPERATURE_GRID, key=lambda t: (scores[str(t)], abs(np.log(t))))
+    return float(chosen), scores
+
+
 def _select_temperature(
     past_probabilities: list[np.ndarray],
     past_labels: list[np.ndarray],
 ) -> tuple[float, dict[str, float]]:
     if len(past_probabilities) != len(past_labels) or not past_probabilities:
         raise ValueError("温度选择需要成对的历史预测和实际标签。")
-    scores: dict[str, float] = {}
-    for temperature in TEMPERATURE_GRID:
-        losses = [
-            _log_loss(_temperature_transform(p, temperature), y)
-            for p, y in zip(past_probabilities, past_labels)
-        ]
-        scores[str(temperature)] = float(np.mean(losses))
-    # Deterministic tie-break: prefer the value closest to no calibration (T=1).
-    chosen = min(TEMPERATURE_GRID, key=lambda t: (scores[str(t)], abs(np.log(t))))
-    return float(chosen), scores
+    losses = [
+        _temperature_loss_vector(p, y)
+        for p, y in zip(past_probabilities, past_labels)
+    ]
+    return _select_temperature_from_losses(losses)
 
 
 def _rank_metrics(probabilities: np.ndarray, labels: np.ndarray) -> dict[str, float]:
@@ -212,9 +228,7 @@ def run_v86_probability_audit(
         for idx in range(int(min_history), n)
     }
     matrix = clean[NUMBER_COLS].to_numpy(dtype=np.int16, copy=True)
-    forecast_probabilities: list[np.ndarray] = []
-    forecast_labels: list[np.ndarray] = []
-    forecast_draws: list[int] = []
+    forecast_loss_vectors: list[np.ndarray] = []
     detail_rows: list[dict[str, Any]] = []
 
     for target_idx in range(first_forecast_idx, n):
@@ -223,24 +237,23 @@ def run_v86_probability_audit(
         )
         labels = _labels(matrix[target_idx])
         target_draw = int(draws[target_idx])
-        if len(forecast_probabilities) < calibration_window:
+        # Cache this forecast's candidate-temperature losses once. Later targets
+        # reuse these immutable values rather than recalibrating all 200 old rows.
+        current_loss_vector = _temperature_loss_vector(probabilities, labels)
+        if len(forecast_loss_vectors) < calibration_window:
             temperature = 1.0
             calibration_loss = None
             calibration_scores: dict[str, float] = {}
         else:
-            temperature, calibration_scores = _select_temperature(
-                forecast_probabilities[-calibration_window:],
-                forecast_labels[-calibration_window:],
+            temperature, calibration_scores = _select_temperature_from_losses(
+                forecast_loss_vectors[-calibration_window:]
             )
             calibration_loss = calibration_scores[str(temperature)]
         calibrated = _temperature_transform(probabilities, temperature)
         v4 = _v4_probabilities(matrix[:target_idx])
 
-        forecast_probabilities.append(probabilities.copy())
-        forecast_labels.append(labels.copy())
-        forecast_draws.append(target_draw)
-
         if target_idx < first_test_idx:
+            forecast_loss_vectors.append(current_loss_vector)
             continue
 
         raw_metrics = _score(probabilities, labels)
@@ -269,6 +282,7 @@ def run_v86_probability_audit(
             for key, value in metrics.items():
                 row[f"{prefix}_{key}"] = value
         detail_rows.append(row)
+        forecast_loss_vectors.append(current_loss_vector)
 
     detail = pd.DataFrame(detail_rows)
     if len(detail) != test_draws:
