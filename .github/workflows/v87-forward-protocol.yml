@@ -145,7 +145,11 @@ jobs:
               echo "No immutable pre-draw lock exists for latest draw ${target}."
               exit 1
             fi
-            artifact_id="$(python -c 'import json,sys; d=json.load(open(sys.argv[1])); print(d["archive_commitment"]["github_actions_artifact_id"])' "$legacy_manifest")"
+            artifact_id="$(python -c 'import json,sys; d=json.load(open(sys.argv[1])); print(d.get("archive_commitment",{}).get("github_actions_artifact_id",""))' "$legacy_manifest")"
+            if [[ -z "$artifact_id" ]]; then
+              echo "The legacy manifest has no retained GitHub Actions archive ID; cannot safely retrieve its candidate payload."
+              exit 1
+            fi
             gh api "repos/${GH_REPO}/actions/artifacts/${artifact_id}/zip" > "artifacts/v87-score/legacy-archive.zip"
             commit_time="$(git log -1 --format=%cI -- "$legacy_manifest")"
             echo "kind=legacy" >> "$GITHUB_OUTPUT"
