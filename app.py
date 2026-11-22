@@ -73,6 +73,7 @@ from forward_lock_commitment import (
 from v53_randomized_audit import run_multi_seed_random_audit
 from v50_backtest import run_v50_walk_forward
 from v93_multiscale_prequential import analyze_v93
+from v94_multiscale_smart_picker import fit_v94_multiscale_next, generate_v94_tickets
 from v40_store import (
     EventStoreError, GitHubEventStore, export_event_archive,
     import_event_archive, latest_model_snapshot, events_to_forward_locks,
@@ -356,7 +357,8 @@ with page_pick:
     st.subheader("生成10组候选号码")
     st.warning("公平独立开奖下，每组固定六号码的理论头奖概率相同。模型相对评分不是中奖概率，也不是已校准的整注联合概率。")
     V51_MODEL_NAME = "V5联合概率模型"
-    pick_models = [*MODEL_NAMES, V51_MODEL_NAME]
+    V94_MODEL_NAME = "V9.3多尺度研究选号（实验版）"
+    pick_models = [*MODEL_NAMES, V51_MODEL_NAME, V94_MODEL_NAME]
     left, right = st.columns(2)
     with left:
         model = st.selectbox("选号模型", pick_models, index=4, key="v51_pick_model")
@@ -460,6 +462,22 @@ with page_pick:
                     "pair_strength": float(v51_pair_strength),
                 }
                 st.session_state.pop("v36_candidates", None)
+            elif model == V94_MODEL_NAME:
+                if len(df) < 1001:
+                    raise ValueError("V9.3多尺度实验选号至少需要1001期历史数据。")
+                if not quality["range_complete"]:
+                    raise ValueError("历史数据存在缺期，不能运行V9.3多尺度实验选号。")
+                prediction = fit_v94_multiscale_next(df)
+                v94_frame, effective_overlap, overlap_relaxed = generate_v94_tickets(
+                    prediction, count=count, seed=seed_value, max_overlap=int(overlap)
+                )
+                st.session_state["v94_smart_pick"] = {
+                    "frame": v94_frame, "prediction": prediction,
+                    "requested_overlap": int(overlap), "effective_overlap": int(effective_overlap),
+                    "overlap_relaxed": bool(overlap_relaxed), "seed": int(seed_value),
+                }
+                st.session_state.pop("v51_smart_pick", None)
+                st.session_state.pop("v36_candidates", None)
             else:
                 generated, relaxed = generate_candidates(
                     df, count, model, window or len(df), overlap, seed_value
@@ -516,6 +534,29 @@ with page_pick:
             "“六号码边际概率合计”是所选六个号码的边际入选概率之和，可理解为模型估计的期望命中数；"
             "“模型相对得分”仅用于本批候选内部排序，不是该整注号码的联合中奖概率。"
         )
+
+    v94_result = st.session_state.get("v94_smart_pick")
+    if model == V94_MODEL_NAME and isinstance(v94_result, dict):
+        prediction = v94_result["prediction"]
+        st.markdown("### V9.3多尺度研究选号结果（V9.4实验选号器）")
+        st.warning("这是独立实验选号版本，不代表已证明优于随机基准；当前不替换V5.1正式选号器。")
+        vcols = st.columns(4)
+        vcols[0].metric("预测目标期", f"第{prediction['target_draw']}期")
+        vcols[1].metric("训练数据末期", f"第{prediction['history_last_draw']}期")
+        vcols[2].metric("训练窗口", "20—1000期")
+        vcols[3].metric("45维概率总和", f"{prediction['probability_sum']:.6f}")
+        st.caption(f"Dirichlet alpha={prediction['dirichlet_alpha']}｜随机种子={v94_result['seed']}｜不使用共现加权")
+        st.dataframe(v94_result["frame"], hide_index=True, use_container_width=True)
+        if v94_result["overlap_relaxed"]:
+            st.warning(f"为生成10组组合，跨组共享号码上限从{v94_result['requested_overlap']}放宽到{v94_result['effective_overlap']}。")
+        st.dataframe(prediction["number_probabilities"].head(15).round(7), hide_index=True, use_container_width=True)
+        st.download_button(
+            "下载V9.3多尺度实验选号CSV",
+            v94_result["frame"].to_csv(index=False).encode("utf-8-sig"),
+            f"lotto645_v94_multiscale_draw_{prediction['target_draw']}.csv",
+            "text/csv", key="v94_smart_pick_download",
+        )
+        st.caption("六号码边际概率合计是模型估计的期望命中数；组合相对分只用于本批候选内部排序，不是整注中奖概率。")
 
     generated = st.session_state.get("v36_candidates")
     if model != V51_MODEL_NAME and generated is not None:
