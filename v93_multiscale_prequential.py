@@ -64,12 +64,14 @@ def _block_bootstrap_ci(diffs: list[float], seed: int, reps: int = BOOTSTRAP_REP
     return [float(np.quantile(means,.025)), float(np.quantile(means,.975))]
 
 
-def _sign_flip_p(diffs: list[float], seed: int, reps: int = BOOTSTRAP_REPS) -> float:
+def _block_sign_flip_p(diffs: list[float], seed: int, reps: int = BOOTSTRAP_REPS, block: int = 10) -> float:
     arr=np.asarray(diffs,dtype=float); obs=float(arr.mean()); rng=np.random.default_rng(seed)
-    # One-sided alternative: model Brier is lower, i.e. mean(model - uniform) < 0.
+    # Apply one random sign per contiguous block, preserving within-block dependence.
+    chunks=[arr[i:i+block] for i in range(0,len(arr),block)]
     extreme=0
     for _ in range(reps):
-        value=float(np.mean(arr*rng.choice(np.array([-1.0,1.0]),size=len(arr))))
+        signs=rng.choice(np.array([-1.0,1.0]),size=len(chunks))
+        value=float(np.mean(np.concatenate([chunk*sign for chunk,sign in zip(chunks,signs)])))
         if value <= obs: extreme += 1
     return (extreme+1)/(reps+1)
 
@@ -103,7 +105,7 @@ def analyze_v93(draws: list[int], numbers: list[list[int]], bootstrap_reps: int 
         bdiff=[v["brier"]-u["brier"] for v,u in zip(vals,uniform)]
         ldiff=[v["logloss"]-u["logloss"] for v,u in zip(vals,uniform)]
         hdiff=[v["top6_hits"]-u["top6_hits"] for v,u in zip(vals,uniform)]
-        primary_p[name]=_sign_flip_p(bdiff,seed=93000+len(primary_p),reps=bootstrap_reps)
+        primary_p[name]=_block_sign_flip_p(bdiff,seed=93000+len(primary_p),reps=bootstrap_reps,block=10)
         metrics[name]={
             "draws":len(vals),
             "mean_brier":float(np.mean([v["brier"] for v in vals])),
@@ -115,7 +117,7 @@ def analyze_v93(draws: list[int], numbers: list[list[int]], bootstrap_reps: int 
             "logloss_difference_95ci_block10":_block_bootstrap_ci(ldiff,94001+len(metrics),bootstrap_reps),
             "top6_hits_difference_vs_uniform":float(np.mean(hdiff)),
             "top6_hits_difference_95ci_block10":_block_bootstrap_ci(hdiff,95001+len(metrics),bootstrap_reps),
-            "brier_one_sided_signflip_p":primary_p[name],
+            "brier_one_sided_block_signflip_p":primary_p[name],
         }
     adjusted=_holm(primary_p)
     for name in names: metrics[name]["brier_holm_adjusted_p"]=adjusted[name]
@@ -125,7 +127,7 @@ def analyze_v93(draws: list[int], numbers: list[list[int]], bootstrap_reps: int 
           "target_draws":len(draws)-max(WINDOWS),"training_windows":list(WINDOWS),
           "dirichlet_smoothing_alpha":ALPHA,"primary_endpoint":"per-draw 45-dimensional Brier score",
           "primary_family":"9 fixed windows plus equal-weight multiscale ensemble",
-          "bootstrap":"paired circular moving-block bootstrap, block length 10",
+          "bootstrap":"paired circular moving-block bootstrap, block length 10; one-sided block sign-flip randomization, contiguous block length 10",
           "prediction_timing":"strictly before each target draw; no target/future leakage"},
         "uniform_reference":{"marginal_probability":UNIFORM_P,"mean_top6_hits_expected":6*6/45},
         "metrics":metrics,
