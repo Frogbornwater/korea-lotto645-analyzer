@@ -185,6 +185,7 @@ if "v36_project_state" not in st.session_state:
     st.session_state["v36_project_state"] = new_project_state()
 
 # Keep the deployed interface focused; legacy research pages remain in source control but are not exposed.
+# Archived UI entry points such as V3.7联合优化 remain in the codebase for auditability, not in the daily navigation.
 show_legacy_tools = False
 core_tabs = ["系统总览", "智能选号", "历史统计", "数据管理", "V9.3多尺度研究", "前瞻锁定与评分"]
 tab_pages = st.tabs(core_tabs)
