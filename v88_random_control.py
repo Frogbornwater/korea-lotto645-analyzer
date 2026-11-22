@@ -49,11 +49,13 @@ def _mbb(values: np.ndarray, *, repetitions: int, block_length: int, seed: int) 
     starts = rng.integers(0, n, size=(repetitions, blocks))
     idx = (starts[:, :, None] + np.arange(block_length)[None, None, :]) % n
     means = x[idx.reshape(repetitions, -1)[:, :n]].mean(axis=1)
+    centered_null = means - float(x.mean())
+    p_one_sided = (1.0 + float(np.sum(centered_null >= float(x.mean())))) / (float(repetitions) + 1.0)
     return {
         "mean": float(x.mean()),
         "ci_low": float(np.quantile(means, 0.025)),
         "ci_high": float(np.quantile(means, 0.975)),
-        "p_one_sided": float((1 + np.sum(means <= 0)) / (repetitions + 1)),
+        "p_one_sided": p_one_sided,
     }
 
 
@@ -81,6 +83,10 @@ def run_v88_random_control(
     clean = validate_frame(frame).reset_index(drop=True)
     if clean.empty or clean["draw_no"].iloc[0] != 1 or np.any(np.diff(clean["draw_no"]) != 1):
         raise ValueError("V8.8 requires complete, consecutive manually imported draw history from draw 1.")
+    if detail.empty:
+        raise ValueError("V8.8 requires at least one prequential target draw.")
+    if detail["target_draw"].duplicated().any():
+        raise ValueError("V8.8 detail contains duplicate target draw rows.")
     if random_portfolios_per_draw < 100:
         raise ValueError("At least 100 random portfolios per target draw are required.")
     if bootstrap_repetitions < 100 or block_length < 1:
