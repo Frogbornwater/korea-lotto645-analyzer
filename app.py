@@ -98,9 +98,9 @@ try:
 except (FileNotFoundError, json.JSONDecodeError, OSError):
     _EXPERIMENT_LEDGER = {"experiments": [], "known_reviewed_ranges": []}
 
-st.set_page_config(page_title="Lotto 6/45 V5.0 · 预测研究平台", page_icon="🎯", layout="wide")
-st.title("🎯 韩国 Lotto 6/45 · V5.0 预测研究平台")
-st.caption("V5联合概率预测｜V4研究治理兼容｜手动历史数据导入｜离线滚动回测")
+st.set_page_config(page_title="Lotto 6/45 · V9.3研究与前瞻验证平台", page_icon="🎯", layout="wide")
+st.title("🎯 韩国 Lotto 6/45 · V9.3研究与前瞻验证平台")
+st.caption("V5.1正式选号器｜V9.3多尺度逐期研究｜手动历史数据管理与版本比较｜前瞻锁定审计")
 
 if "v40_events" not in st.session_state:
     st.session_state["v40_events"] = []
