@@ -4,9 +4,14 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from pathlib import Path
 
 import pandas as pd
+
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
 from lotto_core import validate_frame
 from v85_hybrid_backtest import run_v85_walk_forward
@@ -15,13 +20,13 @@ from v88_random_control import run_v88_random_control, write_v88_artifacts
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--history", default="data/lotto645.csv")
+    parser.add_argument("--history", default=str(ROOT / "data" / "lotto645.csv"))
     parser.add_argument("--test-draws", type=int, default=500)
     parser.add_argument("--random-portfolios", type=int, default=1000)
     parser.add_argument("--seed", type=int, default=882026)
     parser.add_argument("--bootstrap-repetitions", type=int, default=10000)
     parser.add_argument("--block-length", type=int, default=10)
-    parser.add_argument("--output-dir", default="artifacts/v88")
+    parser.add_argument("--output-dir", default=str(ROOT / "artifacts" / "v88"))
     args = parser.parse_args()
 
     frame = validate_frame(pd.read_csv(args.history))
