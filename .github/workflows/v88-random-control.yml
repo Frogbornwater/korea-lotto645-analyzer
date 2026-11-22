@@ -1,0 +1,77 @@
+name: V8.8 multi-random-control research
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "v88_random_control.py"
+      - "scripts/v88_random_control_research.py"
+      - "tests/test_v88_random_control.py"
+      - "V8.8_RANDOM_CONTROL.md"
+      - ".github/workflows/v88-random-control.yml"
+      - "v85_hybrid_backtest.py"
+      - "v50_predictive_engine.py"
+      - "v81_batch_sampler.py"
+      - "v85_hybrid_portfolio.py"
+  workflow_dispatch:
+    inputs:
+      test_draws:
+        description: "Number of historical target draws (up to 500)"
+        required: true
+        default: "500"
+        type: string
+      random_portfolios:
+        description: "Independent random ten-ticket portfolios per target draw"
+        required: true
+        default: "1000"
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+      - run: python -m pip install -r requirements.txt
+      - run: python -m py_compile v88_random_control.py scripts/v88_random_control_research.py
+      - run: python -m unittest discover -s tests -p "test_v88_random_control.py" -v
+      - run: python -m unittest discover -s tests -p "test_v81_batch_sampler.py" -v
+      - run: python -m unittest discover -s tests -p "test_v50_predictive_engine.py" -v
+
+  full-research:
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request'
+    needs: tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+      - run: python -m pip install -r requirements.txt
+      - name: Run V8.8 replay
+        env:
+          TEST_DRAWS: ${{ inputs.test_draws || '500' }}
+          RANDOM_PORTFOLIOS: ${{ inputs.random_portfolios || '1000' }}
+        run: |
+          python scripts/v88_random_control_research.py \
+            --history data/lotto645.csv \
+            --test-draws "$TEST_DRAWS" \
+            --random-portfolios "$RANDOM_PORTFOLIOS" \
+            --seed 882026 --bootstrap-repetitions 10000 --block-length 10
+      - uses: actions/upload-artifact@v4
+        with:
+          name: v88-multi-random-control-report
+          path: artifacts/v88/
+          if-no-files-found: error
+          retention-days: 180
