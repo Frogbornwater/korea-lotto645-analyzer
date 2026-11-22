@@ -201,7 +201,7 @@ if show_legacy_tools:
     (
         page_backtest, page_optimizer, page_joint, page_robust, page_ensemble,
         page_portfolio, page_models, page_review, page_v40, page_v50, page_v52
-    ) = tab_pages[5:]
+    ) = tab_pages[6:]
 
 with page_v93:
     st.subheader("V9.3 多时间尺度逐期概率研究")
