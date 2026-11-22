@@ -509,6 +509,13 @@ def score_v87_lock(
         "actual_bonus_number": int(clean.iloc[-1]["bonus"]),
         "pre_draw_history_fingerprint_verified": True,
         "commitment_timing": _timing_status(target_date, commitment_timestamp_utc),
+        "probability_forecast": {
+            "source": "immutable_pre_draw_lock_bundle",
+            "vector_length": 45,
+            "marginal_inclusion_probabilities": [float(x) for x in probabilities.tolist()],
+            "vector_sha256": _sha256(_canonical_bytes([float(x) for x in probabilities.tolist()])),
+            "sum": float(probabilities.sum()),
+        },
         **_score_groups(bundle["candidate_groups"], actual, probabilities=probabilities),
         "evidence_boundary": {
             "single_draw_result_is_not_statistical_superiority_evidence": True,
