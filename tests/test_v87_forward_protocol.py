@@ -115,6 +115,15 @@ class V87ForwardProtocolTests(unittest.TestCase):
             self.assertEqual(score["commitment_timing"]["status"], "verified_commit_date_precedes_draw_date")
             self.assertEqual(score["actual_main_numbers"], [1, 7, 14, 22, 33, 45])
             self.assertEqual(len(score["strategy_metrics"]["V5_raw_probability"]["ticket_hits"]), 10)
+            forecast = score["probability_forecast"]
+            self.assertEqual(forecast["source"], "immutable_pre_draw_lock_bundle")
+            self.assertEqual(forecast["vector_length"], 45)
+            self.assertEqual(len(forecast["marginal_inclusion_probabilities"]), 45)
+            self.assertAlmostEqual(forecast["sum"], 6.0, places=6)
+            self.assertEqual(
+                forecast["vector_sha256"],
+                hashlib.sha256(_canonical_bytes(forecast["marginal_inclusion_probabilities"])).hexdigest(),
+            )
             self.assertTrue(score["evidence_boundary"]["single_draw_result_is_not_statistical_superiority_evidence"])
 
     def test_tampered_candidate_file_is_rejected(self):
