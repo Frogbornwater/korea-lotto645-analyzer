@@ -265,14 +265,22 @@ def prepare_v87_lock(
     }
     manifest_bytes = json.dumps(manifest, ensure_ascii=False, indent=2).encode("utf-8") + b"\n"
     # Open in exclusive-create mode. A concurrent or repeated invocation fails closed.
+    created_candidate = False
+    created_manifest = False
     try:
         with candidate_path.open("xb") as stream:
+            created_candidate = True
             stream.write(candidate_bytes)
         with manifest_path.open("xb") as stream:
+            created_manifest = True
             stream.write(manifest_bytes)
     except Exception:
-        candidate_path.unlink(missing_ok=True)
-        manifest_path.unlink(missing_ok=True)
+        # Remove only files created by this invocation; never delete a concurrent
+        # lock that appeared after the initial existence check.
+        if created_candidate:
+            candidate_path.unlink(missing_ok=True)
+        if created_manifest:
+            manifest_path.unlink(missing_ok=True)
         raise
     return bundle, manifest, (str(candidate_path), str(manifest_path))
 
@@ -419,11 +427,15 @@ def _score_groups(
         }
     else:
         v5_prob = None
-    uniform = metrics.get("uniform_random_control")
+    uniform_key = next(
+        (name for name in metrics if name.lower() == "uniform_random_control"),
+        None,
+    )
+    uniform = metrics.get(uniform_key) if uniform_key else None
     comparisons = {}
     if uniform:
         for name, result in metrics.items():
-            if name == "uniform_random_control":
+            if name == uniform_key:
                 continue
             comparisons[name] = {
                 "mean_hits_difference_vs_uniform": float(
