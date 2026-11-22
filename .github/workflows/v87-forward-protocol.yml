@@ -1,0 +1,209 @@
+name: V8.7 immutable forward lock and scoring
+
+on:
+  workflow_dispatch:
+    inputs:
+      operation:
+        description: "prepare a new lock, or score the latest manually imported draw"
+        required: true
+        type: choice
+        options:
+          - prepare
+          - score_latest
+      confirmation:
+        description: "Type LOCK to publish a new lock, or SCORE to score an existing lock"
+        required: true
+        type: choice
+        options:
+          - NO
+          - LOCK
+          - SCORE
+
+permissions:
+  contents: write
+  actions: read
+
+concurrency:
+  group: v87-forward-protocol
+  cancel-in-progress: false
+
+jobs:
+  forward-protocol:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt
+
+      - name: Compile V8.7 protocol
+        run: python -m py_compile v87_forward_protocol.py scripts/v87_forward_protocol.py
+
+      - name: Run V8.7 tests
+        run: python -m unittest discover -s tests -p "test_v87_forward_protocol.py" -v
+
+      - name: Prepare the next-draw candidate lock
+        id: prepare
+        if: inputs.operation == 'prepare'
+        shell: bash
+        run: |
+          if [[ "\${{ inputs.confirmation }}" != "LOCK" ]]; then
+            echo "Refusing to publish a lock without explicit LOCK confirmation."
+            exit 1
+          fi
+          python scripts/v87_forward_protocol.py prepare \
+            --history data/lotto645.csv \
+            --commitment-dir data/forward_lock_commitments \
+            --output-dir artifacts/v87 \
+            --github-output "$GITHUB_OUTPUT"
+
+      - name: Upload candidate bundle and manifest
+        if: inputs.operation == 'prepare'
+        uses: actions/upload-artifact@v4
+        with:
+          name: v87-forward-lock-draw-\${{ steps.prepare.outputs.target_draw }}
+          path: artifacts/v87/
+          if-no-files-found: error
+          retention-days: 180
+
+      - name: Publish immutable lock branch
+        if: inputs.operation == 'prepare'
+        env:
+          TARGET_DRAW: \${{ steps.prepare.outputs.target_draw }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          branch="forward-locks/draw-\${TARGET_DRAW}-v87"
+          if git ls-remote --exit-code --heads origin "$branch" >/dev/null 2>&1; then
+            echo "Target-specific lock branch already exists; refusing to overwrite."
+            exit 1
+          fi
+          candidate="artifacts/v87/draw_\${TARGET_DRAW}_v87_candidates.json"
+          manifest="artifacts/v87/draw_\${TARGET_DRAW}_v87_manifest.json"
+          target_dir="data/forward_lock_commitments"
+          target_candidate="\${target_dir}/draw_\${TARGET_DRAW}_v87_candidates.json"
+          target_manifest="\${target_dir}/draw_\${TARGET_DRAW}_v87_manifest.json"
+          test ! -e "$target_candidate"
+          test ! -e "$target_manifest"
+          mkdir -p "$target_dir"
+          cp "$candidate" "$target_candidate"
+          cp "$manifest" "$target_manifest"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch -c "$branch"
+          git add "$target_candidate" "$target_manifest"
+          git commit -m "Lock V8.7 candidates for draw \${TARGET_DRAW}"
+          git push origin "HEAD:refs/heads/\${branch}"
+          echo "Published immutable lock branch \${branch} at $(git rev-parse HEAD)"
+
+      - name: Locate the committed lock for the latest result
+        id: locate
+        if: inputs.operation == 'score_latest'
+        env:
+          GH_TOKEN: \${{ github.token }}
+          GH_REPO: \${{ github.repository }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "\${{ inputs.confirmation }}" != "SCORE" ]]; then
+            echo "Refusing to score without explicit SCORE confirmation."
+            exit 1
+          fi
+          target="$(python scripts/v87_forward_protocol.py latest-draw --history data/lotto645.csv)"
+          branch="forward-locks/draw-\${target}-v87"
+          mkdir -p artifacts/v87-score
+
+          if git ls-remote --exit-code --heads origin "$branch" >/dev/null 2>&1; then
+            git fetch origin "$branch"
+            git show "FETCH_HEAD:data/forward_lock_commitments/draw_\${target}_v87_candidates.json" > "artifacts/v87-score/candidates.json"
+            git show "FETCH_HEAD:data/forward_lock_commitments/draw_\${target}_v87_manifest.json" > "artifacts/v87-score/manifest.json"
+            commit_time="$(git show -s --format=%cI FETCH_HEAD)"
+            echo "kind=v87" >> "$GITHUB_OUTPUT"
+            echo "candidate=artifacts/v87-score/candidates.json" >> "$GITHUB_OUTPUT"
+            echo "manifest=artifacts/v87-score/manifest.json" >> "$GITHUB_OUTPUT"
+            echo "commit_time=\${commit_time}" >> "$GITHUB_OUTPUT"
+          else
+            legacy_manifest=""
+            if [[ -f "data/forward_lock_commitments/draw_\${target}_research.json" ]]; then
+              legacy_manifest="data/forward_lock_commitments/draw_\${target}_research.json"
+            elif [[ -f "data/forward_lock_commitments/draw_\${target}.json" ]]; then
+              legacy_manifest="data/forward_lock_commitments/draw_\${target}.json"
+            fi
+            if [[ -z "$legacy_manifest" ]]; then
+              echo "No immutable pre-draw lock exists for latest draw \${target}."
+              exit 1
+            fi
+            artifact_id="$(python -c 'import json,sys; d=json.load(open(sys.argv[1])); print(d["archive_commitment"]["github_actions_artifact_id"])' "$legacy_manifest")"
+            gh api "repos/\${GH_REPO}/actions/artifacts/\${artifact_id}/zip" > "artifacts/v87-score/legacy-archive.zip"
+            commit_time="$(git log -1 --format=%cI -- "$legacy_manifest")"
+            echo "kind=legacy" >> "$GITHUB_OUTPUT"
+            echo "manifest=\${legacy_manifest}" >> "$GITHUB_OUTPUT"
+            echo "archive=artifacts/v87-score/legacy-archive.zip" >> "$GITHUB_OUTPUT"
+            echo "commit_time=\${commit_time}" >> "$GITHUB_OUTPUT"
+          fi
+          echo "target_draw=\${target}" >> "$GITHUB_OUTPUT"
+
+      - name: Score the immutable V8.7 lock
+        if: inputs.operation == 'score_latest' && steps.locate.outputs.kind == 'v87'
+        run: |
+          python scripts/v87_forward_protocol.py score \
+            --history data/lotto645.csv \
+            --candidate "\${{ steps.locate.outputs.candidate }}" \
+            --manifest "\${{ steps.locate.outputs.manifest }}" \
+            --commit-timestamp-utc "\${{ steps.locate.outputs.commit_time }}" \
+            --output "artifacts/v87-score/draw_\${{ steps.locate.outputs.target_draw }}_v87_score.json"
+
+      - name: Score the existing legacy V8.x lock
+        if: inputs.operation == 'score_latest' && steps.locate.outputs.kind == 'legacy'
+        run: |
+          python scripts/v87_forward_protocol.py score-legacy \
+            --history data/lotto645.csv \
+            --manifest "\${{ steps.locate.outputs.manifest }}" \
+            --archive "\${{ steps.locate.outputs.archive }}" \
+            --commit-timestamp-utc "\${{ steps.locate.outputs.commit_time }}" \
+            --output "artifacts/v87-score/draw_\${{ steps.locate.outputs.target_draw }}_legacy_score.json"
+
+      - name: Upload post-draw score report
+        if: inputs.operation == 'score_latest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: v87-forward-score-draw-\${{ steps.locate.outputs.target_draw }}
+          path: artifacts/v87-score/*.json
+          if-no-files-found: error
+          retention-days: 180
+
+      - name: Publish immutable score branch
+        if: inputs.operation == 'score_latest'
+        env:
+          TARGET_DRAW: \${{ steps.locate.outputs.target_draw }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          branch="forward-lock-scores/draw-\${TARGET_DRAW}-v87"
+          target="data/forward_lock_scores/draw_\${TARGET_DRAW}_v87.json"
+          if git ls-remote --exit-code --heads origin "$branch" >/dev/null 2>&1 || [[ -e "$target" ]]; then
+            echo "A score for this draw already exists; refusing to rewrite it."
+            exit 1
+          fi
+          mkdir -p data/forward_lock_scores
+          score_file="$(find artifacts/v87-score -maxdepth 1 -name '*score.json' -print -quit)"
+          test -n "$score_file"
+          cp "$score_file" "$target"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch -c "$branch"
+          git add "$target"
+          git commit -m "Record V8.7 forward score for draw \${TARGET_DRAW}"
+          git push origin "HEAD:refs/heads/\${branch}"
