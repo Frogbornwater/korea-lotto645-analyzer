@@ -50,7 +50,7 @@ def _mbb(values: np.ndarray, *, repetitions: int, block_length: int, seed: int) 
     idx = (starts[:, :, None] + np.arange(block_length)[None, None, :]) % n
     means = x[idx.reshape(repetitions, -1)[:, :n]].mean(axis=1)
     centered_null = means - float(x.mean())
-    p_one_sided = (1.0 + float(np.sum(centered_null >= float(x.mean())))) / (float(repetitions) + 1.0)
+    p_one_sided = (1.0 + float(np.sum(centered_null <= -float(x.mean())))) / (float(repetitions) + 1.0)
     return {
         "mean": float(x.mean()),
         "ci_low": float(np.quantile(means, 0.025)),
