@@ -3,7 +3,7 @@ import sys, tempfile, unittest
 from pathlib import Path
 import numpy as np
 ROOT=Path(__file__).resolve().parents[1]; sys.path.insert(0,str(ROOT))
-from v93_multiscale_prequential import _forecast, analyze_v93, load_draws, _holm
+from v93_multiscale_prequential import _forecast, analyze_v93, load_draws, _holm, _block_sign_flip_p
 
 class V93Tests(unittest.TestCase):
     def test_forecast_sums_to_six_and_is_shrunk(self):
@@ -24,6 +24,10 @@ class V93Tests(unittest.TestCase):
             analyze_v93(list(range(1,1001)),[list(range(1,7)) for _ in range(1000)],1000)
         with self.assertRaisesRegex(ValueError,"唯一且严格升序"):
             analyze_v93([1,1]+list(range(3,1002)),[list(range(1,7)) for _ in range(1001)],1000)
+    def test_block_sign_flip_is_deterministic(self):
+        diffs=[-0.01,0.02,-0.03,0.01]*8
+        self.assertEqual(_block_sign_flip_p(diffs,seed=7,reps=1000,block=4),
+                         _block_sign_flip_p(diffs,seed=7,reps=1000,block=4))
     def test_holm_is_monotone_in_sorted_order(self):
         p={"a":.01,"b":.04,"c":.03}
         adj=_holm(p)
