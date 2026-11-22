@@ -6,6 +6,7 @@ import io
 import json
 import inspect
 import sys
+import hashlib
 from pathlib import Path
 
 # Always prioritize the app's own project directory before importing local modules.
@@ -71,8 +72,7 @@ from forward_lock_commitment import (
 )
 from v53_randomized_audit import run_multi_seed_random_audit
 from v50_backtest import run_v50_walk_forward
-from scripts.v55_prequential_temperature_calibration import run_experiment as run_v55_temperature_experiment
-from scripts.v55_build_audit_bundle import build_forward_lock as build_v55_forward_temperature_lock
+from v93_multiscale_prequential import analyze_v93
 from v40_store import (
     EventStoreError, GitHubEventStore, export_event_archive,
     import_event_archive, latest_model_snapshot, events_to_forward_locks,
@@ -98,9 +98,9 @@ try:
 except (FileNotFoundError, json.JSONDecodeError, OSError):
     _EXPERIMENT_LEDGER = {"experiments": [], "known_reviewed_ranges": []}
 
-st.set_page_config(page_title="Lotto 6/45 V5.0 · 预测研究平台", page_icon="🎯", layout="wide")
-st.title("🎯 韩国 Lotto 6/45 · V5.0 预测研究平台")
-st.caption("V5联合概率预测｜V4研究治理兼容｜手动历史数据导入｜离线滚动回测")
+st.set_page_config(page_title="Lotto 6/45 · V9.3研究与前瞻验证平台", page_icon="🎯", layout="wide")
+st.title("🎯 韩国 Lotto 6/45 · V9.3研究与前瞻验证平台")
+st.caption("V5.1正式选号器｜V9.3多尺度逐期研究｜手动历史数据管理与版本比较｜前瞻锁定审计")
 
 if "v40_events" not in st.session_state:
     st.session_state["v40_events"] = []
@@ -184,23 +184,152 @@ st.caption(f"数据来源：{data_source}｜治理底座版本：{ENGINE_VERSION
 if "v36_project_state" not in st.session_state:
     st.session_state["v36_project_state"] = new_project_state()
 
-show_legacy_tools = st.sidebar.checkbox(
-    "显示高级研究工具（旧版）", value=False,
-    help="默认隐藏重复的旧版优化与研究页面；需要检查历史实验时可临时展开。"
-)
-core_tabs = ["系统总览", "智能选号", "历史统计", "数据管理", "V5.5研究与前瞻验证"]
-legacy_tabs = [
-    "回测中心", "单模型参数实验", "V3.7联合优化", "V3.8稳健研究",
-    "模型集成", "组合优化", "模型管理", "选号复盘", "V4.0研究治理",
-    "V5.0预测研究", "V5.2逐期验证"
-]
-tab_pages = st.tabs(core_tabs + (legacy_tabs if show_legacy_tools else []))
-page_overview, page_pick, page_stats, page_data, page_v55 = tab_pages[:5]
-if show_legacy_tools:
-    (
-        page_backtest, page_optimizer, page_joint, page_robust, page_ensemble,
-        page_portfolio, page_models, page_review, page_v40, page_v50, page_v52
-    ) = tab_pages[5:]
+# Keep the deployed interface focused; legacy research pages remain in source control but are not exposed.
+# Archived UI entry points such as V3.7联合优化 remain in the codebase for auditability, not in the daily navigation.
+show_legacy_tools = False
+core_tabs = ["系统总览", "智能选号", "历史统计", "数据管理", "V9.3多尺度研究", "前瞻锁定与评分"]
+tab_pages = st.tabs(core_tabs)
+page_overview, page_pick, page_stats, page_data, page_v93, page_v55 = tab_pages
+
+with page_v93:
+    st.subheader("V9.3 多时间尺度逐期概率研究")
+    st.caption("固定研究方案：20、30、50、100、200、300、500、800、1000期窗口，以及等权多窗口融合；Dirichlet 平滑 alpha=80。")
+    st.warning(
+        "此页是研究工作台，不会自动改变正式选号器。V9.3此前没有建立预测优势；"
+        "重新运行历史回放不会把历史证据变成前瞻证据。"
+    )
+    protocol_cols = st.columns(4)
+    protocol_cols[0].metric("研究版本", "V9.3")
+    protocol_cols[1].metric("固定窗口", "9种")
+    protocol_cols[2].metric("融合策略", "等权多尺度")
+    protocol_cols[3].metric("Bootstrap区块", "10期")
+    with st.expander("V9.3 完整研究方法", expanded=False):
+        st.markdown(
+            "- **逐期前瞻**：每个目标期只使用目标期之前的数据。\n"
+            "- **预测变量**：45个号码的边际入选概率，概率总和为6。\n"
+            "- **平滑方法**：Dirichlet 均匀先验，alpha=80。\n"
+            "- **主要终点**：45维 Brier Score。\n"
+            "- **辅助终点**：Bernoulli LogLoss、Top-6命中数。\n"
+            "- **不确定性**：配对循环移动区块 Bootstrap，区块长度10。\n"
+            "- **显著性检验**：区块符号翻转检验，区块长度10。\n"
+            "- **多重比较**：9个固定窗口与等权融合共10项，使用 Holm 校正。\n"
+            "- **晋升原则**：统计结果、区间方向、时间稳定性和独立前瞻验证必须同时审查。"
+        )
+    if len(df) < 1001:
+        st.info(f"当前只有{len(df)}期有效数据；V9.3至少需要1001期。")
+    elif not quality.get("range_complete", False):
+        st.error("当前历史数据存在缺期。请先手动补齐连续期号，再运行严格逐期研究。")
+    else:
+        st.caption(
+            f"当前数据范围：第{quality['first_draw']}—{quality['last_draw']}期，"
+            f"共{len(df)}期；研究仅使用本页面加载的手动数据。"
+        )
+        reps = st.select_slider(
+            "区块重抽样次数",
+            options=[1000, 3000, 5000, 10000, 20000],
+            value=10000,
+            key="v93_bootstrap_reps",
+            help="V9.3统计方案的计算精度设置；最低1000次，默认10000次。"
+        )
+        if st.button("运行完整 V9.3 多尺度研究", type="primary", use_container_width=True, key="v93_run_research"):
+            try:
+                ordered = df.sort_values("draw_no")
+                draw_ids = ordered["draw_no"].astype(int).tolist()
+                draw_numbers = ordered[[f"n{i}" for i in range(1, 7)]].astype(int).values.tolist()
+                with st.spinner(f"正在运行逐期回放、区块Bootstrap与区块符号翻转检验（{reps:,}次）…"):
+                    report = analyze_v93(draw_ids, draw_numbers, bootstrap_reps=int(reps))
+                canonical = ordered[COLUMNS].to_csv(index=False, lineterminator="\n").encode("utf-8")
+                report["data"] = {
+                    "sha256": hashlib.sha256(canonical).hexdigest(),
+                    "draw_count": len(draw_ids),
+                    "first_draw": draw_ids[0],
+                    "last_draw": draw_ids[-1],
+                    "source": data_source,
+                }
+                st.session_state["v93_multiscale_ui_report"] = report
+                st.session_state["v93_multiscale_ui_fingerprint"] = report["data"]["sha256"]
+                st.success("V9.3研究完成。结果已保存在当前会话，可下载JSON报告。")
+            except Exception as exc:
+                st.error(f"V9.3研究运行失败：{type(exc).__name__}: {exc}")
+        report = st.session_state.get("v93_multiscale_ui_report")
+        current_data_fp = hashlib.sha256(
+            df.sort_values("draw_no")[COLUMNS].to_csv(index=False, lineterminator="\n").encode("utf-8")
+        ).hexdigest()
+        if isinstance(report, dict):
+            if report.get("data", {}).get("sha256") != current_data_fp:
+                st.warning("当前数据指纹与上次研究不一致。下面保留上次结果供查阅；如需评价新数据，请重新运行V9.3。")
+            else:
+                st.caption(f"研究数据 SHA-256：{current_data_fp}")
+            protocol = report["protocol"]
+            meta_cols = st.columns(4)
+            meta_cols[0].metric("目标期数", f"{protocol['target_draws']:,}")
+            meta_cols[1].metric("目标起始期", str(protocol["target_start_draw"]))
+            meta_cols[2].metric("目标结束期", str(protocol["target_end_draw"]))
+            meta_cols[3].metric("平滑 alpha", str(protocol["dirichlet_smoothing_alpha"]))
+            metric_rows = []
+            for name, item in report["metrics"].items():
+                label = "等权多窗口融合" if name == "equal_multiscale" else f"{name.replace('window_', '')}期窗口"
+                bci = item["brier_difference_95ci_block10"]
+                lci = item["logloss_difference_95ci_block10"]
+                hci = item["top6_hits_difference_95ci_block10"]
+                metric_rows.append({
+                    "策略": label,
+                    "目标期数": item["draws"],
+                    "平均Brier": item["mean_brier"],
+                    "Brier差值": item["brier_difference_vs_uniform"],
+                    "Brier差值95%CI": f"[{bci[0]:.7f}, {bci[1]:.7f}]",
+                    "平均LogLoss": item["mean_logloss"],
+                    "LogLoss差值": item["logloss_difference_vs_uniform"],
+                    "LogLoss差值95%CI": f"[{lci[0]:.7f}, {lci[1]:.7f}]",
+                    "Top6平均命中": item["mean_top6_hits"],
+                    "Top6差值": item["top6_hits_difference_vs_uniform"],
+                    "Top6差值95%CI": f"[{hci[0]:.4f}, {hci[1]:.4f}]",
+                    "区块检验p值": item["brier_one_sided_block_signflip_p"],
+                    "Holm校正p值": item["brier_holm_adjusted_p"],
+                })
+            result_frame = pd.DataFrame(metric_rows)
+            st.markdown("#### 十种策略完整结果")
+            st.dataframe(result_frame.round(7), hide_index=True, use_container_width=True)
+            st.caption("Brier / LogLoss差值 = 策略分数 − 均匀概率基准分数；负值更好。Top6差值为策略命中数减去均匀基准的0.8。")
+            brier_chart = result_frame[["策略", "Brier差值"]].copy()
+            st.plotly_chart(
+                px.bar(brier_chart, x="策略", y="Brier差值", title="Brier差值：低于0才优于均匀概率基准"),
+                use_container_width=True,
+            )
+            secondary = result_frame[["策略", "LogLoss差值", "Top6差值"]].melt(
+                id_vars="策略", var_name="指标", value_name="相对均匀基准差值"
+            )
+            st.plotly_chart(
+                px.bar(secondary, x="策略", y="相对均匀基准差值", color="指标", barmode="group",
+                       title="LogLoss与Top-6相对均匀基准差值"),
+                use_container_width=True,
+            )
+            st.markdown("#### 均匀概率基准与结论")
+            baseline_brier = float(np.mean([
+                x["mean_brier"] - x["brier_difference_vs_uniform"]
+                for x in report["metrics"].values()
+            ]))
+            baseline_logloss = float(np.mean([
+                x["mean_logloss"] - x["logloss_difference_vs_uniform"]
+                for x in report["metrics"].values()
+            ]))
+            base_cols = st.columns(3)
+            base_cols[0].metric("均匀基准Brier", f"{baseline_brier:.8f}")
+            base_cols[1].metric("均匀基准LogLoss", f"{baseline_logloss:.8f}")
+            base_cols[2].metric("均匀基准Top6期望", f"{report['uniform_reference']['mean_top6_hits_expected']:.3f}")
+            if report["interpretation"]["predictive_advantage_established"]:
+                st.success("V9.3报告标记为候选优势；仍需独立前瞻验证后才能考虑生产晋升。")
+            else:
+                st.warning("V9.3当前结论：尚未建立预测优势。不要仅凭某个窗口排名靠前就切换正式选号模型。")
+            with st.expander("查看完整V9.3原始研究报告JSON"):
+                st.json(report)
+            st.download_button(
+                "下载完整 V9.3 研究报告 JSON",
+                json.dumps(report, ensure_ascii=False, indent=2, allow_nan=False),
+                f"v93_multiscale_prequential_{report['data']['last_draw']}.json",
+                "application/json",
+                key="v93_download_report",
+            )
 
 with page_overview:
     st.subheader("系统状态")
@@ -1270,6 +1399,61 @@ with page_data:
     st.dataframe(df.tail(20), hide_index=True, use_container_width=True)
     st.download_button("下载当前清洗后的历史数据", df.to_csv(index=False).encode("utf-8-sig"), "lotto645_clean_history.csv", "text/csv")
     st.download_button("下载空白数据模板", pd.DataFrame(columns=COLUMNS).to_csv(index=False).encode("utf-8-sig"), "lotto645_history_template.csv", "text/csv")
+    st.divider()
+    st.markdown("### 后台数据更新比较")
+    st.caption("把你新下载的CSV/Excel手动上传到左侧后，这里会与Streamlit部署仓库中的历史基线逐期比较。这里只做预览和审计，不会自动覆盖GitHub历史文件。")
+    try:
+        baseline_df, baseline_report = load_repository_history(HISTORY_PATH)
+        if baseline_df.empty:
+            st.info("部署仓库中暂无历史基线；请先上传一份完整的手动历史文件。")
+        else:
+            base = baseline_df.set_index("draw_no")
+            incoming = df.set_index("draw_no")
+            common = sorted(set(base.index) & set(incoming.index))
+            added_draws = sorted(set(incoming.index) - set(base.index))
+            removed_draws = sorted(set(base.index) - set(incoming.index))
+            compare_cols = ["date", *[f"n{i}" for i in range(1, 7)], "bonus"]
+            changed = []
+            for draw_no in common:
+                old_row = base.loc[draw_no]
+                new_row = incoming.loc[draw_no]
+                changed_fields = [col for col in compare_cols if str(old_row[col]) != str(new_row[col])]
+                if changed_fields:
+                    changed.append({
+                        "期号": int(draw_no),
+                        "差异字段": "、".join(changed_fields),
+                        "仓库原值": " | ".join(f"{col}={old_row[col]}" for col in changed_fields),
+                        "上传新值": " | ".join(f"{col}={new_row[col]}" for col in changed_fields),
+                    })
+            cc = st.columns(4)
+            cc[0].metric("仓库基线末期", int(baseline_df["draw_no"].max()))
+            cc[1].metric("上传文件末期", int(df["draw_no"].max()))
+            cc[2].metric("新增期数", len(added_draws))
+            cc[3].metric("内容冲突期数", len(changed))
+            if removed_draws:
+                st.warning(f"上传文件缺少仓库已有的 {len(removed_draws)} 期记录；不会将这些期数自动删除。")
+            if changed:
+                st.error("发现已有期号的开奖内容不一致。请先核对源文件，不能直接覆盖。")
+                st.dataframe(pd.DataFrame(changed), hide_index=True, use_container_width=True)
+            elif added_draws:
+                st.success("没有发现旧期内容冲突；检测到新增期数，可进入人工审核。")
+            else:
+                st.info("上传文件与仓库基线没有新增期数，也没有发现内容差异。")
+            if added_draws:
+                added_frame = incoming.loc[added_draws].reset_index()
+                st.markdown("#### 待审核新增记录")
+                st.dataframe(added_frame, hide_index=True, use_container_width=True)
+                st.download_button(
+                    "下载新增记录审核CSV",
+                    added_frame.to_csv(index=False).encode("utf-8-sig"),
+                    "lotto645_new_draws_review.csv",
+                    "text/csv",
+                    key="download_new_draws_review",
+                )
+            st.caption("比较规则：期号是主键；旧期内容不一致视为冲突；只有通过人工核验后，才应更新仓库历史CSV并重新运行V9.3。")
+    except Exception as exc:
+        st.error(f"后台数据比较失败：{type(exc).__name__}: {exc}")
+
 
 if show_legacy_tools:
     with page_v50:
@@ -1909,8 +2093,8 @@ if show_legacy_tools:
     st.caption("统计说明：历史频率、遗漏、共现和结构约束仅描述历史样本；公平独立开奖下，任何固定六号码组合的理论概率相同。")
 
 with page_v55:
-    st.subheader("V5.5 预测校准与前瞻验证")
-    st.caption("集中查看概率校准研究、冻结参数和对照结果。此处的历史报告属于回溯研究，不会自动改变智能选号的生产参数。")
+    st.subheader("前瞻锁定与开奖后评分")
+    st.caption("这里只保留开奖前锁定、开奖后导入人工数据评分与随机对照。历史研究页面已从日常界面移除。")
     st.warning("公平独立开奖下，校准不能提高单注头奖的理论概率。只有开奖前锁定并在未来新开奖中持续验证，才可能形成预测优势证据。")
 
     st.markdown("#### 当前手动历史数据")
@@ -1919,66 +2103,6 @@ with page_v55:
     v55_meta_cols[1].metric("首期", str(int(df["draw_no"].min())))
     v55_meta_cols[2].metric("末期", str(int(df["draw_no"].max())))
     v55_meta_cols[3].metric("数据连续性", "连续" if quality["sequence_complete"] else "存在缺期")
-
-    st.markdown("#### 温度校准研究")
-    st.write("校准实验使用较早的50期严格逐期预测选择温度，再在其后的50期独立于该次选温过程的历史区间评价；另生成仅适用于基础数据末期之后的冻结温度锁。")
-    if len(df) < 280:
-        st.info("当前数据不足280期，暂不能运行完整的V5.5温度校准实验。")
-    else:
-        if st.button("运行V5.5校准与冻结参数研究", type="primary", use_container_width=True, key="v55_run_calibration"):
-            with st.spinner("正在进行严格时间顺序校准与样本外评价…"):
-                try:
-                    v55_report = run_v55_temperature_experiment(df)
-                    v55_lock = build_v55_forward_temperature_lock(df)
-                    st.session_state["v55_temperature_report"] = v55_report
-                    st.session_state["v55_temperature_lock"] = v55_lock
-                    st.success("V5.5研究报告与冻结温度锁已生成。它们仍属于研究用途，尚未接入正式选号。")
-                except Exception as exc:
-                    st.error(f"V5.5研究运行失败：{type(exc).__name__}: {exc}")
-
-    v55_report = st.session_state.get("v55_temperature_report")
-    v55_lock = st.session_state.get("v55_temperature_lock")
-    if isinstance(v55_report, dict):
-        st.markdown("#### 历史校准与评价结果")
-        selected_temp = v55_report["selected_temperature"]
-        rcols = st.columns(4)
-        rcols[0].metric("历史选定温度", f"{selected_temp['temperature']:.3f}")
-        rcols[1].metric("校准区间", f"{v55_report['calibration_period'][0]}–{v55_report['calibration_period'][1]}")
-        rcols[2].metric("评价区间", f"{v55_report['evaluation_period'][0]}–{v55_report['evaluation_period'][1]}")
-        rcols[3].metric("搜索网格状态", "边界最优" if selected_temp["grid_boundary_optimum"] else "内部最优")
-        score_rows = []
-        for model_name, values in v55_report["evaluation_scores"].items():
-            score_rows.append({
-                "模型": model_name,
-                "Brier分数（越低越好）": values["brier"],
-                "Log Loss（越低越好）": values["log_loss"],
-                "等频ECE（描述性）": values["reliability"]["equal_count_ECE"],
-            })
-        st.dataframe(pd.DataFrame(score_rows).round(8), hide_index=True, use_container_width=True)
-        st.caption("该评价区间可能与此前研究重叠，不是全新独立测试。ECE分箱仅作描述，不能单独作为模型晋升依据。")
-        st.download_button(
-            "下载V5.5校准评价JSON",
-            json.dumps(v55_report, ensure_ascii=False, indent=2, allow_nan=False),
-            "lotto645_v55_temperature_evaluation.json",
-            "application/json", key="v55_download_eval",
-        )
-
-    if isinstance(v55_lock, dict):
-        st.markdown("#### 冻结的前瞻研究参数")
-        lcols = st.columns(4)
-        lcols[0].metric("冻结温度", f"{v55_lock['temperature']:.3f}")
-        lcols[1].metric("参数基础末期", str(v55_lock["base_last_draw"]))
-        lcols[2].metric("训练窗口", f"{v55_lock['training_window']}期")
-        lcols[3].metric("Ridge alpha", str(v55_lock["ridge_alpha"]))
-        st.caption(f"数据指纹：{v55_lock['history_sha256']}")
-        st.info("该温度锁只允许用于基础末期之后的目标期；当前版本仅保存和展示研究锁，不会自动应用到正式选号，也不会在新开奖后自动重新拟合。")
-        lock_download = {k: v for k, v in v55_lock.items() if k != "temperature_grid"}
-        st.download_button(
-            "下载V5.5冻结温度锁JSON",
-            json.dumps(lock_download, ensure_ascii=False, indent=2, allow_nan=False),
-            f"lotto645_v55_temperature_lock_after_{v55_lock['base_last_draw']}.json",
-            "application/json", key="v55_download_lock",
-        )
 
     st.markdown("#### 前瞻验证原则")
     st.markdown(
