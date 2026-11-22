@@ -32,7 +32,8 @@ class V92CalibrationUncertaintyTests(unittest.TestCase):
         self.assertAlmostEqual(result["metrics"]["calibration_in_the_large_gap_observed_minus_predicted"], 0.0, places=12)
         self.assertAlmostEqual(result["metrics"]["expected_calibration_error_equal_width"], 0.0, places=12)
         self.assertFalse(result["calibration_uncertainty_ready"])
-        self.assertEqual(result["metrics"]["ece_95ci"], [0.0, 0.0])
+        self.assertAlmostEqual(result["metrics"]["ece_95ci"][0], 0.0, places=12)
+        self.assertAlmostEqual(result["metrics"]["ece_95ci"][1], 0.0, places=12)
 
     def test_draw_cluster_bootstrap_is_deterministic(self):
         rows = [make_record(i) for i in range(1, 5)]
