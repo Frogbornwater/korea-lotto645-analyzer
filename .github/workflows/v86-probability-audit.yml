@@ -1,0 +1,48 @@
+name: V8.6 probability calibration and ranking audit
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "v86_probability_audit.py"
+      - "scripts/v86_probability_audit.py"
+      - "tests/test_v86_probability_audit.py"
+      - "v50_predictive_engine.py"
+      - "v50_backtest.py"
+      - "data/lotto645.csv"
+      - ".github/workflows/v86-probability-audit.yml"
+  push:
+    branches: [main]
+    paths:
+      - "v86_probability_audit.py"
+      - "scripts/v86_probability_audit.py"
+      - "tests/test_v86_probability_audit.py"
+      - ".github/workflows/v86-probability-audit.yml"
+
+jobs:
+  probability-audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt
+      - name: Compile V8.6 modules
+        run: python -m py_compile v86_probability_audit.py scripts/v86_probability_audit.py
+      - name: Run V8.6 tests
+        run: python -m unittest discover -s tests -p "test_v86_probability_audit.py" -v
+      - name: Run V5 engine regression tests
+        run: python -m unittest discover -s tests -p "test_v50_predictive_engine.py" -v
+      - name: Run 500-draw V8.6 probability audit
+        run: python scripts/v86_probability_audit.py
+      - name: Upload V8.6 report and diagnostics
+        uses: actions/upload-artifact@v4
+        with:
+          name: v86-probability-audit
+          path: artifacts/v86/
+          if-no-files-found: error
+          retention-days: 90
