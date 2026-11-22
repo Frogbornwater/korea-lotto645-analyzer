@@ -323,6 +323,22 @@ def run_v86_probability_audit(
         str(float(t)): int(np.sum(np.isclose(detail["temperature_selected_from_prior_forecasts"], t)))
         for t in TEMPERATURE_GRID
     }
+    ranking_checks = []
+    for k in TOP_K_VALUES:
+        expected = 6.0 * k / 45.0
+        difference = detail[f"v5_top{k}_hits"].to_numpy(dtype=float) - expected
+        low, high, _ = _moving_block_bootstrap(
+            difference, repetitions=bootstrap_repetitions,
+            block_length=block_length, seed=int(seed) + 5000 + k,
+        )
+        ranking_checks.append({
+            "top_k": k,
+            "v5_mean_hits": float(detail[f"v5_top{k}_hits"].mean()),
+            "uniform_expected_hits": expected,
+            "mean_difference": float(difference.mean()),
+            "moving_block_bootstrap_95ci": [low, high],
+            "inferential_status": "exploratory_ci_not_included_in_primary_holm_family",
+        })
     metric_summary = {}
     for prefix in ("v5", "calibrated", "v4", "uniform"):
         metric_summary[prefix] = {
@@ -353,6 +369,10 @@ def run_v86_probability_audit(
         "uniform_expected_topk_hits": {str(k): 6.0 * k / 45.0 for k in TOP_K_VALUES},
         "primary_comparisons": comparisons,
         "summary_by_method": metric_summary,
+        "exploratory_ranking_checks": ranking_checks,
+        "temperature_grid_upper_boundary_fraction": float(
+            temperature_counts[str(float(max(TEMPERATURE_GRID)))] / len(detail)
+        ),
         "reliability": {
             "raw_v5_equal_count_bins": raw_reliability,
             "calibrated_equal_count_bins": cal_reliability,
