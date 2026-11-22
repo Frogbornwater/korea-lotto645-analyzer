@@ -101,7 +101,7 @@ except (FileNotFoundError, json.JSONDecodeError, OSError):
 
 st.set_page_config(page_title="Lotto 6/45 · V9.3研究与前瞻验证平台", page_icon="🎯", layout="wide")
 st.title("🎯 韩国 Lotto 6/45 · V9.3研究与前瞻验证平台")
-st.caption("V5.1正式选号器｜V9.3多尺度逐期研究｜手动历史数据管理与版本比较｜前瞻锁定审计")
+st.caption("V9.4多尺度默认选号器｜V9.3多尺度逐期研究｜手动历史数据管理与版本比较｜前瞻锁定审计")
 
 if "v40_events" not in st.session_state:
     st.session_state["v40_events"] = []
@@ -361,7 +361,7 @@ with page_pick:
     pick_models = [*MODEL_NAMES, V51_MODEL_NAME, V94_MODEL_NAME]
     left, right = st.columns(2)
     with left:
-        model = st.selectbox("选号模型", pick_models, index=4, key="v51_pick_model")
+        model = st.selectbox("选号模型", pick_models, index=pick_models.index(V94_MODEL_NAME), key="v94_pick_model")
         window_label = st.selectbox("近期数据窗口（旧模型使用）", ["最近30期", "最近50期", "最近100期", "最近200期", "最近500期", "全部历史"], index=2)
         window = None if window_label == "全部历史" else int(window_label.replace("最近", "").replace("期", ""))
     with right:
@@ -539,7 +539,7 @@ with page_pick:
     if model == V94_MODEL_NAME and isinstance(v94_result, dict):
         prediction = v94_result["prediction"]
         st.markdown("### V9.3多尺度研究选号结果（V9.4实验选号器）")
-        st.warning("这是独立实验选号版本，不代表已证明优于随机基准；当前不替换V5.1正式选号器。")
+        st.warning("当前默认使用V9.4多尺度选号器。该模型尚未证明优于均匀随机基准；请将候选号码视为研究性参考，不代表中奖概率提高。V5.1保留为可选对照。")
         vcols = st.columns(4)
         vcols[0].metric("预测目标期", f"第{prediction['target_draw']}期")
         vcols[1].metric("训练数据末期", f"第{prediction['history_last_draw']}期")
