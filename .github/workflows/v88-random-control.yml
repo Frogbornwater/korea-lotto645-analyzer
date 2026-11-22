@@ -46,25 +46,28 @@ jobs:
       - run: python -m unittest discover -s tests -p "test_v50_predictive_engine.py" -v
 
   full-research:
-    if: github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request'
     needs: tests
     runs-on: ubuntu-latest
     timeout-minutes: 180
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: main
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
           cache: "pip"
       - run: python -m pip install -r requirements.txt
       - name: Run V8.8 replay
+        env:
+          TEST_DRAWS: ${{ inputs.test_draws || '500' }}
+          RANDOM_PORTFOLIOS: ${{ inputs.random_portfolios || '1000' }}
         run: |
           python scripts/v88_random_control_research.py \
             --history data/lotto645.csv \
-            --test-draws "${{ inputs.test_draws }}" \
-            --random-portfolios "${{ inputs.random_portfolios }}" \
+            --test-draws "$TEST_DRAWS" \
+            --random-portfolios "$RANDOM_PORTFOLIOS" \
             --seed 882026 --bootstrap-repetitions 10000 --block-length 10
       - uses: actions/upload-artifact@v4
         with:
