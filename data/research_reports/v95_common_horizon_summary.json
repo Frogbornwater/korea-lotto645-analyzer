@@ -1,0 +1,152 @@
+{
+  "version": "9.5.0-common-horizon-prequential-audit",
+  "status": "predictive_advantage_not_established",
+  "protocol": {
+    "target_start": 1002,
+    "target_end": 1251,
+    "target_draws": 250,
+    "history_cutoff": "每个目标期只使用该期之前已出现的历史开奖数据",
+    "v94_windows": [
+      20,
+      30,
+      50,
+      100,
+      200,
+      300,
+      500,
+      800,
+      1000
+    ],
+    "v94_alpha": 80,
+    "v51_training_window": 500,
+    "v51_ridge_alpha": 1,
+    "tickets_per_model_per_draw": 10,
+    "max_pairwise_ticket_overlap": 4,
+    "bootstrap": "配对循环移动区块 Bootstrap，区块长度10",
+    "data_sha256_raw_csv": "ef6394cd488506fd4e6e2b59bf46fd0435d3c99b3b8ff3e888a9fe5da04f371e",
+    "latest_draw_in_csv": 1251,
+    "workflow_run_id": 45027921229,
+    "workflow_artifact_id": 14756093811,
+    "audit_merge_commit": "c00fd485963ce604d7a792a3188ced1b3d35bb2b"
+  },
+  "mean_metrics": {
+    "v94": {
+      "brier": 0.115690538,
+      "logloss": 0.393252838,
+      "top6_hits": 0.756,
+      "ticket_mean_hits": 0.8024,
+      "ticket_3plus_rate": 0.0228,
+      "batch_3plus": 0.2
+    },
+    "v51": {
+      "brier": 0.115631926,
+      "logloss": 0.393019078,
+      "top6_hits": 0.808,
+      "ticket_mean_hits": 0.8196,
+      "ticket_3plus_rate": 0.0248,
+      "batch_3plus": 0.224
+    },
+    "uniform": {
+      "brier": 0.115555556,
+      "logloss": 0.392674467,
+      "top6_hits": 0.724,
+      "ticket_mean_hits": 0.81,
+      "ticket_3plus_rate": 0.0248,
+      "batch_3plus": 0.2
+    }
+  },
+  "paired_comparisons": {
+    "v94_minus_v51": {
+      "brier": {
+        "mean_difference": 0.00005861,
+        "ci95": [
+          -0.00014479,
+          0.00026587
+        ]
+      },
+      "logloss": {
+        "mean_difference": 0.00023376,
+        "ci95": [
+          -0.00067125,
+          0.00112223
+        ]
+      },
+      "top6_hits": {
+        "mean_difference": -0.052,
+        "ci95": [
+          -0.188,
+          0.08
+        ]
+      },
+      "ticket_mean_hits": {
+        "mean_difference": -0.0172,
+        "ci95": [
+          -0.0372,
+          0.002
+        ]
+      },
+      "ticket_3plus_rate": {
+        "mean_difference": -0.002,
+        "ci95": [
+          -0.0088,
+          0.0052
+        ]
+      },
+      "batch_3plus": {
+        "mean_difference": -0.024,
+        "ci95": [
+          -0.08,
+          0.032
+        ]
+      }
+    },
+    "v94_minus_uniform": {
+      "brier": {
+        "mean_difference": 0.00013498,
+        "ci95": [
+          -0.00000565,
+          0.00027558
+        ]
+      },
+      "logloss": {
+        "mean_difference": 0.00057837,
+        "ci95": [
+          -0.0000374,
+          0.00120581
+        ]
+      },
+      "top6_hits": {
+        "mean_difference": 0.032,
+        "ci95": [
+          -0.1,
+          0.168
+        ]
+      },
+      "ticket_mean_hits": {
+        "mean_difference": -0.0076,
+        "ci95": [
+          -0.0252,
+          0.0108
+        ]
+      },
+      "ticket_3plus_rate": {
+        "mean_difference": -0.002,
+        "ci95": [
+          -0.0068,
+          0.0032
+        ]
+      },
+      "batch_3plus": {
+        "mean_difference": 0,
+        "ci95": [
+          -0.044,
+          0.044
+        ]
+      }
+    }
+  },
+  "interpretation": {
+    "predictive_advantage_established": false,
+    "note": "回溯逐期比较不能证明公平独立彩票存在可利用预测优势；置信区间用于描述抽样不确定性，不是因果优势证明。"
+  }
+}
